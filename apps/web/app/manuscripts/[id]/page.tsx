@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { diffChars } from "diff";
 import TopBar from "@/components/TopBar";
-import { api, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
+import { api, downloadFile, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
 import { RichDocView, RichDocEditor, parseDoc, blockPreview, type Block } from "@/components/RichDoc";
 
 type Comment = {
@@ -154,6 +154,8 @@ export default function ManuscriptPage() {
             <h1>{ms.title}</h1>
           </div>
           <span className={`badge ${finalized ? "badge-ok" : "badge-warn"}`}>{STATUS_LABEL[ms.status]}</span>
+          <button className="btn btn-ghost btn-sm" title="导出为 Markdown" onClick={() => downloadFile(`/manuscripts/${id}/export?format=md`).catch((e) => flash(e.message))}>导出 MD</button>
+          <button className="btn btn-ghost btn-sm" title="导出为 HTML" onClick={() => downloadFile(`/manuscripts/${id}/export?format=html`).catch((e) => flash(e.message))}>导出 HTML</button>
           {isChief && (
             <button
               className={`btn ${finalized ? "btn-ghost" : ""}`}

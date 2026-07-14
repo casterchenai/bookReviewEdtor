@@ -58,6 +58,25 @@ export async function api<T = unknown>(
   return data as T;
 }
 
+// 带鉴权地下载文件（导出），从 Content-Disposition 取文件名
+export async function downloadFile(path: string) {
+  const res = await fetch(`${BASE}/api${path}`, {
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, (data as { error?: string }).error || "导出失败");
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+  const name = m ? decodeURIComponent(m[1]) : "export";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  a.remove(); URL.revokeObjectURL(url);
+}
+
 export const ROLE_LABEL: Record<string, string> = {
   CHIEF_EDITOR: "主编",
   AGENT: "文学经纪人",

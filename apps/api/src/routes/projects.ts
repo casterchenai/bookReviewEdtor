@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { AI_PROVIDERS, sanitizeAiConfig } from "../lib/ai-providers.js";
-import { parseHtml, parseMarkdown } from "../lib/content.js";
+import { parseHtml, parseMarkdown, normalizeDoc, blocksToHtml, blocksToMarkdown, textToMarkdown, type Block } from "../lib/content.js";
 import { parsePdf } from "../lib/pdf.js";
 
 export const projectsRouter = Router();
@@ -114,6 +114,47 @@ projectsRouter.get("/:id", async (req: AuthedRequest, res) => {
   });
   if (!project) return res.status(404).json({ error: "项目不存在" });
   res.json({ ...project, myRole: role, hasBookAiConfig: Boolean(project.aiConfig) });
+});
+
+// 导出整本书为 Markdown / HTML（合并所有章节，按部分分组）
+projectsRouter.get("/:id/export", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (!role) return res.status(403).json({ error: "您不是该项目成员" });
+  const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+  if (!project) return res.status(404).json({ error: "项目不存在" });
+  const chapters = await prisma.manuscript.findMany({
+    where: { projectId: req.params.id },
+    orderBy: { order: "asc" },
+    select: { title: true, content: true, docJson: true, section: true },
+  });
+  const format = req.query.format === "html" ? "html" : "md";
+
+  if (format === "md") {
+    const parts: string[] = [`# ${project.title}\n`];
+    let lastSection = "";
+    for (const c of chapters) {
+      if (c.section && c.section !== lastSection) { parts.push(`## ${c.section}`); lastSection = c.section; }
+      const doc = c.docJson ? normalizeDoc(JSON.parse(c.docJson)) : null;
+      parts.push(`### ${c.title}`);
+      parts.push(doc ? blocksToMarkdown(doc.blocks) : textToMarkdown(c.content));
+    }
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(project.title)}.md`);
+    return res.send(parts.join("\n\n"));
+  }
+
+  const all: Block[] = [{ type: "heading", level: 1, text: project.title }];
+  let lastSection = "";
+  for (const c of chapters) {
+    if (c.section && c.section !== lastSection) { all.push({ type: "heading", level: 2, text: c.section }); lastSection = c.section; }
+    all.push({ type: "heading", level: 3, text: c.title });
+    const doc = c.docJson ? normalizeDoc(JSON.parse(c.docJson)) : null;
+    if (doc) all.push(...doc.blocks);
+    else for (const p of c.content.split(/\n\n/).filter((x) => x.trim())) all.push({ type: "para", text: p });
+  }
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(project.title)}.html`);
+  res.send(blocksToHtml(all, project.title));
 });
 
 // 更新项目信息 / 修订标准（仅主编）

@@ -3,7 +3,24 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { roleLabel } from "./projects.js";
-import { blocksToText, normalizeDoc, setBlockText, type Block } from "../lib/content.js";
+import {
+  blocksToText, normalizeDoc, setBlockText, type Block,
+  blocksToMarkdown, blocksToHtml, textToMarkdown, textToHtml,
+} from "../lib/content.js";
+
+// 将书稿渲染为 Markdown / HTML（有块用块，否则用纯文本投影）
+export function renderManuscript(m: { title: string; content: string; docJson: string }, format: "md" | "html"): string {
+  const doc = m.docJson ? normalizeDoc(JSON.parse(m.docJson)) : null;
+  if (format === "md") {
+    const body = doc ? blocksToMarkdown(doc.blocks) : textToMarkdown(m.content);
+    return `# ${m.title}\n\n${body}`;
+  }
+  return doc ? blocksToHtml(doc.blocks, m.title) : textToHtml(m.content, m.title);
+}
+
+function contentType(format: string) {
+  return format === "md" ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8";
+}
 
 export const manuscriptsRouter = Router();
 manuscriptsRouter.use(requireAuth);
@@ -40,6 +57,18 @@ manuscriptsRouter.get("/:id", async (req: AuthedRequest, res) => {
     }),
   ]);
   res.json({ ...manuscript, comments, revisions, myRole: role });
+});
+
+// 导出单章为 Markdown / HTML
+manuscriptsRouter.get("/:id/export", async (req: AuthedRequest, res) => {
+  const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
+  if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
+  if (!role) return res.status(403).json({ error: "您不是该项目成员" });
+  const format = req.query.format === "html" ? "html" : "md";
+  const out = renderManuscript(manuscript, format);
+  res.setHeader("Content-Type", contentType(format));
+  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(manuscript.title)}.${format}`);
+  res.send(out);
 });
 
 // 保存内容 → 生成新修订版本

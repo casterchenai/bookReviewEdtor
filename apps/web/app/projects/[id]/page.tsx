@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import AiConfigForm from "@/components/AiConfigForm";
-import { api, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
+import { api, downloadFile, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
 
 type BookRole = { id: string; name: string; base: string; order?: number; isDefault?: boolean; _count?: { members: number } };
 type Member = {
@@ -52,6 +52,7 @@ export default function ProjectPage() {
   const [newRoleName, setNewRoleName] = useState("");
   const [newRoleBase, setNewRoleBase] = useState("REVIEWER");
   const [showAi, setShowAi] = useState(false);
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
   const [toast, setToast] = useState("");
 
   const load = useCallback(() => {
@@ -73,6 +74,22 @@ export default function ProjectPage() {
 
   const isChief = project.myRole === "CHIEF_EDITOR";
   const assignableRoles = project.bookRoles.filter((r) => r.base !== "AI_ASSISTANT");
+
+  async function batchReview() {
+    if (!project) return;
+    const targets = project.manuscripts.filter((m) => m.status !== "FINALIZED");
+    if (targets.length === 0) { flash("没有可审校的书稿"); return; }
+    if (!confirm(`将对 ${targets.length} 篇未定稿书稿依次运行 AI 智能审校，可能需要几分钟。继续？`)) return;
+    setBatch({ done: 0, total: targets.length });
+    let ok = 0;
+    for (let i = 0; i < targets.length; i++) {
+      try { await api(`/ai/manuscripts/${targets[i].id}/review`, { method: "POST" }); ok++; }
+      catch { /* 单章失败继续 */ }
+      setBatch({ done: i + 1, total: targets.length });
+    }
+    setBatch(null); load();
+    flash(`批量审校完成：${ok}/${targets.length} 篇已生成 AI 意见`);
+  }
 
   function uploadKind(name: string) {
     return /\.(md|markdown)$/i.test(name) ? "Markdown"
@@ -171,7 +188,36 @@ export default function ProjectPage() {
           <div>
             {/* 书稿列表 */}
             <div className="card">
-              <h2>书稿章节（{project.manuscripts.length}）</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <h2 style={{ flex: 1, margin: 0 }}>书稿章节（{project.manuscripts.length}）</h2>
+                {project.manuscripts.length > 0 && (
+                  <>
+                    <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/projects/${id}/export?format=md`).catch((e) => flash(e.message))}>导出整书 MD</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/projects/${id}/export?format=html`).catch((e) => flash(e.message))}>导出整书 HTML</button>
+                    {project.myRole !== "AI_ASSISTANT" && (
+                      <button className="btn btn-sm" disabled={!!batch} onClick={batchReview}>
+                        {batch ? `AI 审校中 ${batch.done}/${batch.total}` : "🤖 批量 AI 审校"}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+              {project.manuscripts.length > 0 && (() => {
+                const total = project.manuscripts.length;
+                const fin = project.manuscripts.filter((m) => m.status === "FINALIZED").length;
+                const open = project.manuscripts.reduce((s, m) => s + m._count.comments, 0);
+                const pct = Math.round((fin / total) * 100);
+                return (
+                  <div className="progress-box">
+                    <div className="progress-stats">
+                      <span>定稿 <strong>{fin}</strong>/{total}</span>
+                      <span>待处理意见 <strong>{open}</strong> 条</span>
+                      <span>{pct}% 完成</span>
+                    </div>
+                    <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
+                  </div>
+                );
+              })()}
               {project.manuscripts.length === 0 && <div className="empty">暂无书稿，请先新建章节。</div>}
               {groupBySection(project.manuscripts).map(([section, items]) => (
                 <div key={section}>
