@@ -37,6 +37,7 @@ export default function ManuscriptPage() {
   const [suggestText, setSuggestText] = useState("");
   const [withSuggestion, setWithSuggestion] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  const [reviseBusy, setReviseBusy] = useState<string | null>(null);
   const [diffTarget, setDiffTarget] = useState<{ number: number; content: string } | null>(null);
   const [toast, setToast] = useState("");
 
@@ -104,7 +105,6 @@ export default function ManuscriptPage() {
     } catch (err) { flash(err instanceof Error ? err.message : "操作失败"); }
   }
 
-  const [reviseBusy, setReviseBusy] = useState<string | null>(null);
   async function aiRevise(commentId: string) {
     setReviseBusy(commentId);
     try {
