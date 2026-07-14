@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { AI_PROVIDERS, sanitizeAiConfig } from "../lib/ai-providers.js";
+import { parseHtml, parseMarkdown } from "../lib/content.js";
 
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
@@ -336,22 +337,49 @@ projectsRouter.delete("/:id/ai-config", async (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-// 新建书稿章节
+// 新建书稿章节（可选：上传 HTML / Markdown 解析为结构化内容）
 projectsRouter.post("/:id/manuscripts", async (req: AuthedRequest, res) => {
   const role = await memberRole(req.params.id, req.userId!);
   if (!role) return res.status(403).json({ error: "您不是该项目成员" });
   if (role === "AI_ASSISTANT") return res.status(403).json({ error: "无权限" });
 
-  const schema = z.object({ title: z.string().min(1, "请填写章节标题").max(200) });
+  const schema = z.object({
+    title: z.string().min(1, "请填写章节标题").max(200),
+    section: z.string().max(100).optional(),
+    sourceType: z.enum(["text", "html", "md"]).optional(),
+    source: z.string().max(8_000_000).optional(),
+  });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
+  // 解析上传内容
+  let content = "";
+  let docJson = "";
+  if (parsed.data.source && parsed.data.sourceType && parsed.data.sourceType !== "text") {
+    const r = parsed.data.sourceType === "html" ? parseHtml(parsed.data.source) : parseMarkdown(parsed.data.source);
+    content = r.text;
+    docJson = JSON.stringify(r.doc);
+  } else if (parsed.data.source) {
+    content = parsed.data.source;
+  }
+
   const count = await prisma.manuscript.count({ where: { projectId: req.params.id } });
-  const manuscript = await prisma.manuscript.create({
-    data: { projectId: req.params.id, title: parsed.data.title, order: count, status: "DRAFT" },
-  });
   const me = await prisma.user.findUnique({ where: { id: req.userId! } });
-  await logActivity(req.params.id, me!.name, "新建书稿", parsed.data.title);
+  const manuscript = await prisma.$transaction(async (tx) => {
+    const m = await tx.manuscript.create({
+      data: {
+        projectId: req.params.id, title: parsed.data.title, section: parsed.data.section ?? "",
+        order: count, status: content ? "IN_REVIEW" : "DRAFT", content, docJson,
+      },
+    });
+    if (content) {
+      await tx.revision.create({
+        data: { manuscriptId: m.id, number: 1, authorId: req.userId!, authorRole: role, content, docJson, summary: "导入初稿" },
+      });
+    }
+    return m;
+  });
+  await logActivity(req.params.id, me!.name, "新建书稿", parsed.data.title + (docJson ? "（导入解析）" : ""));
   res.json({ id: manuscript.id });
 });
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { roleLabel } from "./projects.js";
+import { blocksToText, normalizeDoc, setBlockText, type Block } from "../lib/content.js";
 
 export const manuscriptsRouter = Router();
 manuscriptsRouter.use(requireAuth);
@@ -51,16 +52,28 @@ manuscriptsRouter.put("/:id/content", async (req: AuthedRequest, res) => {
   }
 
   const schema = z.object({
-    content: z.string().max(2_000_000),
+    content: z.string().max(5_000_000).optional(),
+    docJson: z.unknown().optional(), // 富内容：{ blocks: Block[] }
     summary: z.string().min(1, "请填写修订说明，便于追溯").max(500),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
-  if (parsed.data.content === manuscript.content) {
-    return res.status(400).json({ error: "内容没有变化" });
+
+  // 富内容：以块为准，重算纯文本投影
+  const doc = parsed.data.docJson !== undefined ? normalizeDoc(parsed.data.docJson) : null;
+  let content: string;
+  let docJson: string;
+  if (doc) {
+    content = blocksToText(doc.blocks);
+    docJson = JSON.stringify(doc);
+    if (docJson === manuscript.docJson) return res.status(400).json({ error: "内容没有变化" });
+  } else {
+    content = parsed.data.content ?? "";
+    docJson = ""; // 纯文本模式
+    if (content === manuscript.content) return res.status(400).json({ error: "内容没有变化" });
   }
 
-  const revision = await createRevision(manuscript.id, req.userId!, role, parsed.data.content, parsed.data.summary);
+  const revision = await createRevision(manuscript.id, req.userId!, role, content, parsed.data.summary, docJson);
   res.json({ ok: true, revisionNumber: revision.number });
 });
 
@@ -71,6 +84,7 @@ export async function createRevision(
   authorRole: "CHIEF_EDITOR" | "AGENT" | "REVIEWER" | "AI_ASSISTANT",
   content: string,
   summary: string,
+  docJson = "",
 ) {
   return prisma.$transaction(async (tx) => {
     const last = await tx.revision.findFirst({
@@ -79,11 +93,11 @@ export async function createRevision(
       select: { number: true },
     });
     const revision = await tx.revision.create({
-      data: { manuscriptId, authorId, authorRole, content, summary, number: (last?.number ?? 0) + 1 },
+      data: { manuscriptId, authorId, authorRole, content, docJson, summary, number: (last?.number ?? 0) + 1 },
     });
     await tx.manuscript.update({
       where: { id: manuscriptId },
-      data: { content, status: "IN_REVIEW" },
+      data: { content, docJson, status: "IN_REVIEW" },
     });
     return revision;
   });
@@ -194,20 +208,28 @@ manuscriptsRouter.patch("/:id/comments/:commentId", async (req: AuthedRequest, r
     return res.status(403).json({ error: "仅主编可采纳或驳回修改建议" });
   }
 
-  // 采纳建议：将建议文本应用到对应段落，自动生成修订版本
+  // 采纳建议：将建议文本应用到对应块/段落，自动生成修订版本
   if (status === "ACCEPTED") {
     if (!comment.suggestedText) return res.status(400).json({ error: "该意见不包含修改建议文本" });
     if (manuscript.status === "FINALIZED") return res.status(409).json({ error: "已定稿书稿不可修改" });
 
-    const paragraphs = manuscript.content.split(/\n\n/);
-    if (comment.paragraphIndex >= paragraphs.length) {
-      return res.status(409).json({ error: "原段落已不存在，无法自动应用，请手动编辑" });
+    const summary = `采纳${roleLabel(comment.authorRole)}的修改建议（第 ${comment.paragraphIndex + 1} 处）`;
+    if (manuscript.docJson) {
+      // 富内容：替换对应块的主文本
+      const doc = normalizeDoc(JSON.parse(manuscript.docJson));
+      if (!doc || comment.paragraphIndex >= doc.blocks.length) {
+        return res.status(409).json({ error: "原内容块已不存在，无法自动应用，请手动编辑" });
+      }
+      doc.blocks[comment.paragraphIndex] = setBlockText(doc.blocks[comment.paragraphIndex] as Block, comment.suggestedText);
+      await createRevision(manuscript.id, req.userId!, role, blocksToText(doc.blocks), summary, JSON.stringify(doc));
+    } else {
+      const paragraphs = manuscript.content.split(/\n\n/);
+      if (comment.paragraphIndex >= paragraphs.length) {
+        return res.status(409).json({ error: "原段落已不存在，无法自动应用，请手动编辑" });
+      }
+      paragraphs[comment.paragraphIndex] = comment.suggestedText;
+      await createRevision(manuscript.id, req.userId!, role, paragraphs.join("\n\n"), summary);
     }
-    paragraphs[comment.paragraphIndex] = comment.suggestedText;
-    await createRevision(
-      manuscript.id, req.userId!, role, paragraphs.join("\n\n"),
-      `采纳${roleLabel(comment.authorRole)}的修改建议（第 ${comment.paragraphIndex + 1} 段）`,
-    );
   }
 
   await prisma.comment.update({ where: { id: comment.id }, data: { status } });

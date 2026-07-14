@@ -119,7 +119,9 @@ model Manuscript {
   title     String
   order     Int              @default(0)
   status    ManuscriptStatus @default(DRAFT)
-  content   String           @default("") // 当前内容（最新版本快照）
+  content   String           @default("") // 纯文本投影（供 AI 审校/对比/搜索）
+  docJson   String           @default("") // 结构化块内容（HTML/MD/PDF 解析结果）；为空表示纯文本
+  section   String           @default("") // 所属部分（如「第一部分」「附录」），用于分组
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
@@ -136,7 +138,8 @@ model Revision {
   number       Int      // 版本号，从 1 递增
   authorId     String
   authorRole   ProjectRole
-  content      String   // 该版本的完整内容快照
+  content      String   // 该版本的纯文本快照
+  docJson      String   @default("") // 该版本的结构化块快照
   summary      String   @default("") // 修订说明/原因
   createdAt    DateTime @default(now())
 

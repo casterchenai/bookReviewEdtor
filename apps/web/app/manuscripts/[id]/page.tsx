@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { diffChars } from "diff";
 import TopBar from "@/components/TopBar";
 import { api, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
+import { RichDocView, RichDocEditor, parseDoc, blockPreview, type Block } from "@/components/RichDoc";
 
 type Comment = {
   id: string; paragraphIndex: number; quote: string; body: string;
@@ -16,7 +17,7 @@ type RevisionMeta = {
   authorRole: string; author: { name: string; isAI: boolean };
 };
 type ManuscriptDetail = {
-  id: string; title: string; status: string; content: string; myRole: string;
+  id: string; title: string; status: string; content: string; docJson: string; myRole: string;
   project: { id: string; title: string; standards: string };
   comments: Comment[]; revisions: RevisionMeta[];
 };
@@ -28,6 +29,7 @@ export default function ManuscriptPage() {
   const [tab, setTab] = useState<"comments" | "history">("comments");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [draftBlocks, setDraftBlocks] = useState<Block[]>([]);
   const [summary, setSummary] = useState("");
   const [selectedPara, setSelectedPara] = useState<number | null>(null);
   const [commentBody, setCommentBody] = useState("");
@@ -53,7 +55,11 @@ export default function ManuscriptPage() {
   if (error) return (<><TopBar /><main className="container page"><div className="empty">{error}</div></main></>);
   if (!ms) return (<><TopBar /><main className="container page"><div className="empty">加载中…</div></main></>);
 
+  const docBlocks = parseDoc(ms.docJson);
+  const isRich = docBlocks !== null;
   const paragraphs = ms.content.split(/\n\n/);
+  const unitCount = isRich ? docBlocks.length : paragraphs.length;
+  const unitText = (i: number) => isRich ? (docBlocks[i] ? blockPreview(docBlocks[i]) : "") : (paragraphs[i] ?? "");
   const isChief = ms.myRole === "CHIEF_EDITOR";
   const finalized = ms.status === "FINALIZED";
   const openComments = ms.comments.filter((c) => c.status === "OPEN");
@@ -62,9 +68,8 @@ export default function ManuscriptPage() {
 
   async function saveContent() {
     try {
-      const r = await api<{ revisionNumber: number }>(`/manuscripts/${id}/content`, {
-        method: "PUT", body: { content: draft, summary },
-      });
+      const body = isRich ? { docJson: { blocks: draftBlocks }, summary } : { content: draft, summary };
+      const r = await api<{ revisionNumber: number }>(`/manuscripts/${id}/content`, { method: "PUT", body });
       setEditing(false);
       setSummary("");
       load();
@@ -79,7 +84,7 @@ export default function ManuscriptPage() {
         method: "POST",
         body: {
           paragraphIndex: selectedPara,
-          quote: paragraphs[selectedPara]?.slice(0, 30) ?? "",
+          quote: unitText(selectedPara)?.slice(0, 30) ?? "",
           body: commentBody,
           category: commentCategory,
           suggestedText: withSuggestion && suggestText.trim() ? suggestText : undefined,
@@ -160,7 +165,7 @@ export default function ManuscriptPage() {
             <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
               <h2 style={{ flex: 1, margin: 0 }}>书稿正文</h2>
               {!editing && !finalized && ms.myRole !== "AI_ASSISTANT" && (
-                <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(ms.content); setEditing(true); }}>进入编辑</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(ms.content); setDraftBlocks(docBlocks ? JSON.parse(JSON.stringify(docBlocks)) : []); setSelectedPara(null); setEditing(true); }}>进入编辑</button>
               )}
               <button className="btn btn-sm" onClick={runAI} disabled={aiBusy || editing}>
                 {aiBusy ? "AI 审校中…" : "🤖 AI 智能审校"}
@@ -169,16 +174,26 @@ export default function ManuscriptPage() {
 
             {editing ? (
               <div>
-                <textarea className="textarea editor-area" value={draft} onChange={(e) => setDraft(e.target.value)} />
+                {isRich ? (
+                  <RichDocEditor blocks={draftBlocks} onChange={setDraftBlocks} />
+                ) : (
+                  <textarea className="textarea editor-area" value={draft} onChange={(e) => setDraft(e.target.value)} />
+                )}
                 <div className="field" style={{ marginTop: 12 }}>
                   <label>修订说明（必填，将写入修订记录）</label>
-                  <input className="input" value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="例如：统一人名译法；修正第 3 段时间线矛盾" />
+                  <input className="input" value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="例如：统一术语；修正第 3 段表述" />
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="btn" onClick={saveContent} disabled={!summary.trim()}>保存为新版本</button>
                   <button className="btn btn-ghost" onClick={() => { setEditing(false); setDraft(ms.content); }}>放弃修改</button>
                 </div>
               </div>
+            ) : isRich ? (
+              docBlocks.length === 0 ? (
+                <div className="empty">暂无内容。</div>
+              ) : (
+                <RichDocView blocks={docBlocks} selectedIndex={selectedPara} onSelect={(i) => setSelectedPara(selectedPara === i ? null : i)} countByIndex={countByPara} />
+              )
             ) : (
               <div className="manuscript-body">
                 {paragraphs.length === 1 && !paragraphs[0].trim() ? (
@@ -220,7 +235,7 @@ export default function ManuscriptPage() {
                 </label>
                 {withSuggestion && (
                   <div className="field">
-                    <textarea className="textarea editor-area" style={{ minHeight: 120 }} placeholder="修改后的整段文本…" value={suggestText || paragraphs[selectedPara]} onChange={(e) => setSuggestText(e.target.value)} />
+                    <textarea className="textarea editor-area" style={{ minHeight: 120 }} placeholder="修改后的整段文本…" value={suggestText || unitText(selectedPara)} onChange={(e) => setSuggestText(e.target.value)} />
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 8 }}>

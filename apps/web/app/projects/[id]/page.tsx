@@ -32,6 +32,7 @@ export default function ProjectPage() {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState("");
   const [newTitle, setNewTitle] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRoleId, setInviteRoleId] = useState("");
   const [standards, setStandards] = useState("");
@@ -61,6 +62,25 @@ export default function ProjectPage() {
 
   const isChief = project.myRole === "CHIEF_EDITOR";
   const assignableRoles = project.bookRoles.filter((r) => r.base !== "AI_ASSISTANT");
+
+  function uploadKind(name: string) {
+    return /\.(md|markdown)$/i.test(name) ? "Markdown" : /\.(html?|htm)$/i.test(name) ? "HTML" : "文本";
+  }
+
+  async function createChapter(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      let body: Record<string, unknown> = { title: newTitle };
+      if (uploadFile) {
+        const text = await uploadFile.text();
+        const sourceType = /\.(md|markdown)$/i.test(uploadFile.name) ? "md" : /\.(html?|htm)$/i.test(uploadFile.name) ? "html" : "text";
+        body = { title: newTitle, sourceType, source: text };
+      }
+      await api(`/projects/${id}/manuscripts`, { method: "POST", body });
+      setNewTitle(""); setUploadFile(null); load();
+      flash(uploadFile ? "已上传并解析为书稿" : "章节已创建");
+    } catch (err) { flash(err instanceof Error ? err.message : "创建失败"); }
+  }
 
   async function addMember(e: React.FormEvent) {
     e.preventDefault();
@@ -143,18 +163,23 @@ export default function ProjectPage() {
                 </Link>
               ))}
               {project.myRole !== "AI_ASSISTANT" && (
-                <form
-                  style={{ display: "flex", gap: 8, marginTop: 14 }}
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    try {
-                      await api(`/projects/${id}/manuscripts`, { method: "POST", body: { title: newTitle } });
-                      setNewTitle(""); load(); flash("章节已创建");
-                    } catch (err) { flash(err instanceof Error ? err.message : "创建失败"); }
-                  }}
-                >
-                  <input className="input" style={{ flex: 1 }} placeholder="新章节标题，例如：第二章 旧信" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} required />
-                  <button className="btn">新建书稿</button>
+                <form style={{ marginTop: 14 }} onSubmit={createChapter}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input className="input" style={{ flex: 1 }} placeholder="新章节标题，例如：第二章 旧信" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} required />
+                    <button className="btn">{uploadFile ? "上传并解析" : "新建书稿"}</button>
+                  </div>
+                  <label className="upload-drop" style={{ display: "block", marginTop: 8 }}>
+                    {uploadFile ? `已选择：${uploadFile.name}（${uploadKind(uploadFile.name)}）` : "可选：上传 HTML / Markdown 文件，自动解析为可审校内容（点击选择）"}
+                    <input
+                      type="file" accept=".html,.htm,.md,.markdown,.txt" style={{ display: "none" }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        setUploadFile(f);
+                        if (f && !newTitle.trim()) setNewTitle(f.name.replace(/\.[^.]+$/, ""));
+                      }}
+                    />
+                  </label>
+                  {uploadFile && <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 6 }} onClick={() => setUploadFile(null)}>清除文件</button>}
                 </form>
               )}
             </div>
