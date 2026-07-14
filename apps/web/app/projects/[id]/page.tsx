@@ -16,9 +16,20 @@ type ProjectDetail = {
   members: Member[];
   bookRoles: BookRole[];
   hasBookAiConfig: boolean;
-  manuscripts: { id: string; title: string; status: string; updatedAt: string; _count: { revisions: number; comments: number } }[];
+  manuscripts: { id: string; title: string; status: string; section: string; updatedAt: string; _count: { revisions: number; comments: number } }[];
   activities: { id: string; actorName: string; action: string; detail: string; createdAt: string }[];
 };
+
+function groupBySection<T extends { section: string }>(items: T[]): [string, T[]][] {
+  const groups: [string, T[]][] = [];
+  const idx = new Map<string, number>();
+  for (const it of items) {
+    const key = it.section || "";
+    if (!idx.has(key)) { idx.set(key, groups.length); groups.push([key, []]); }
+    groups[idx.get(key)!][1].push(it);
+  }
+  return groups;
+}
 
 const BASE_LABEL: Record<string, string> = { CHIEF_EDITOR: "主编（管理权）", AGENT: "内容顾问（编辑+建议）", REVIEWER: "审校员（编辑+建议）", AI_ASSISTANT: "AI 助手" };
 const BASE_OPTIONS = [
@@ -64,7 +75,18 @@ export default function ProjectPage() {
   const assignableRoles = project.bookRoles.filter((r) => r.base !== "AI_ASSISTANT");
 
   function uploadKind(name: string) {
-    return /\.(md|markdown)$/i.test(name) ? "Markdown" : /\.(html?|htm)$/i.test(name) ? "HTML" : "文本";
+    return /\.(md|markdown)$/i.test(name) ? "Markdown"
+      : /\.(html?|htm)$/i.test(name) ? "HTML"
+      : /\.pdf$/i.test(name) ? "PDF" : "文本";
+  }
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+      r.onerror = () => reject(new Error("读取文件失败"));
+      r.readAsDataURL(file);
+    });
   }
 
   async function createChapter(e: React.FormEvent) {
@@ -72,9 +94,13 @@ export default function ProjectPage() {
     try {
       let body: Record<string, unknown> = { title: newTitle };
       if (uploadFile) {
-        const text = await uploadFile.text();
-        const sourceType = /\.(md|markdown)$/i.test(uploadFile.name) ? "md" : /\.(html?|htm)$/i.test(uploadFile.name) ? "html" : "text";
-        body = { title: newTitle, sourceType, source: text };
+        const name = uploadFile.name;
+        if (/\.pdf$/i.test(name)) {
+          body = { title: newTitle, sourceType: "pdf", source: await fileToBase64(uploadFile) };
+        } else {
+          const sourceType = /\.(md|markdown)$/i.test(name) ? "md" : /\.(html?|htm)$/i.test(name) ? "html" : "text";
+          body = { title: newTitle, sourceType, source: await uploadFile.text() };
+        }
       }
       await api(`/projects/${id}/manuscripts`, { method: "POST", body });
       setNewTitle(""); setUploadFile(null); load();
@@ -145,22 +171,27 @@ export default function ProjectPage() {
           <div>
             {/* 书稿列表 */}
             <div className="card">
-              <h2>书稿章节</h2>
+              <h2>书稿章节（{project.manuscripts.length}）</h2>
               {project.manuscripts.length === 0 && <div className="empty">暂无书稿，请先新建章节。</div>}
-              {project.manuscripts.map((m) => (
-                <Link key={m.id} href={`/manuscripts/${m.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                  <div className="revision-item" style={{ cursor: "pointer", alignItems: "center" }}>
-                    <div style={{ flex: 1 }}>
-                      <strong>{m.title}</strong>
-                      <div className="muted small">
-                        修订 {m._count.revisions} 次 · 待处理意见 {m._count.comments} 条 · 更新于 {new Date(m.updatedAt).toLocaleString("zh-CN")}
+              {groupBySection(project.manuscripts).map(([section, items]) => (
+                <div key={section}>
+                  {section && <div className="section-head">{section}</div>}
+                  {items.map((m) => (
+                    <Link key={m.id} href={`/manuscripts/${m.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                      <div className="revision-item" style={{ cursor: "pointer", alignItems: "center" }}>
+                        <div style={{ flex: 1 }}>
+                          <strong>{m.title}</strong>
+                          <div className="muted small">
+                            修订 {m._count.revisions} 次 · 待处理意见 {m._count.comments} 条 · 更新于 {new Date(m.updatedAt).toLocaleString("zh-CN")}
+                          </div>
+                        </div>
+                        <span className={`badge ${m.status === "FINALIZED" ? "badge-ok" : m.status === "IN_REVIEW" ? "badge-warn" : "badge-gray"}`}>
+                          {STATUS_LABEL[m.status]}
+                        </span>
                       </div>
-                    </div>
-                    <span className={`badge ${m.status === "FINALIZED" ? "badge-ok" : m.status === "IN_REVIEW" ? "badge-warn" : "badge-gray"}`}>
-                      {STATUS_LABEL[m.status]}
-                    </span>
-                  </div>
-                </Link>
+                    </Link>
+                  ))}
+                </div>
               ))}
               {project.myRole !== "AI_ASSISTANT" && (
                 <form style={{ marginTop: 14 }} onSubmit={createChapter}>
@@ -169,9 +200,9 @@ export default function ProjectPage() {
                     <button className="btn">{uploadFile ? "上传并解析" : "新建书稿"}</button>
                   </div>
                   <label className="upload-drop" style={{ display: "block", marginTop: 8 }}>
-                    {uploadFile ? `已选择：${uploadFile.name}（${uploadKind(uploadFile.name)}）` : "可选：上传 HTML / Markdown 文件，自动解析为可审校内容（点击选择）"}
+                    {uploadFile ? `已选择：${uploadFile.name}（${uploadKind(uploadFile.name)}）` : "可选：上传 HTML / Markdown / PDF 文件，自动解析为可审校内容（PDF 逐页分文本页/图册页）"}
                     <input
-                      type="file" accept=".html,.htm,.md,.markdown,.txt" style={{ display: "none" }}
+                      type="file" accept=".html,.htm,.md,.markdown,.txt,.pdf" style={{ display: "none" }}
                       onChange={(e) => {
                         const f = e.target.files?.[0] ?? null;
                         setUploadFile(f);

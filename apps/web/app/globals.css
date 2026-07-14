@@ -220,6 +220,9 @@ button { font-family: inherit; }
 .de-tag { flex: 1; font-size: 0.78rem; color: var(--ink-soft); }
 .de-preview { font-size: 0.85rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* 章节分部标题 */
+.section-head { font-size: 0.8rem; font-weight: 700; color: var(--primary-deep); background: var(--primary-tint); padding: 4px 10px; border-radius: 6px; margin: 12px 0 6px; }
+
 /* 上传区 */
 .upload-drop { border: 1.5px dashed var(--edge); border-radius: 8px; padding: 16px; text-align: center; font-size: 0.85rem; color: var(--ink-soft); cursor: pointer; }
 .upload-drop:hover { border-color: var(--primary); background: var(--primary-tint); }

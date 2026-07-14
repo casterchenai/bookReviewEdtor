@@ -228,6 +228,42 @@ async function reviewWithOpenAICompatible(cfg: ResolvedAi, system: string, userM
   return result.data.suggestions;
 }
 
+// ===== 按审阅意见改写单段文本（AI 辅助采纳）=====
+export async function runRewrite(cfg: ResolvedAi, original: string, opinion: string, standards: string): Promise<string> {
+  const standardsBlock = standards.trim() ? `\n\n须遵循的修订标准：\n${standards}` : "";
+  const system = `你是资深图书审校编辑。请根据给定的审阅意见改写这段文本。要求：只输出改写后的完整文本，不要解释、不要加引号或标注。保持原文风格与未涉及部分不变，仅针对意见所指问题修改。${standardsBlock}`;
+  const user = `【审阅意见】\n${opinion}\n\n【原文】\n${original}`;
+
+  if (cfg.provider === "ANTHROPIC") {
+    const client = new Anthropic({ apiKey: cfg.apiKey });
+    const resp = await client.messages.create({
+      model: cfg.model || "claude-sonnet-5",
+      max_tokens: 4000,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+    const block = resp.content.find((b) => b.type === "text");
+    return block && block.type === "text" ? block.text.trim() : "";
+  }
+
+  const base = cfg.baseUrl.replace(/\/$/, "");
+  const resp = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      temperature: 0.4,
+    }),
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    throw new Error(`供应商返回 ${resp.status}：${t.slice(0, 200)}`);
+  }
+  const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
+  return (data.choices?.[0]?.message?.content ?? "").trim();
+}
+
 // 从可能带 ```json 包裹的文本中提取 JSON 主体
 function extractJson(text: string): string {
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);

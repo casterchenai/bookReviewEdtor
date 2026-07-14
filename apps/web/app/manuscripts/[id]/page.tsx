@@ -104,6 +104,17 @@ export default function ManuscriptPage() {
     } catch (err) { flash(err instanceof Error ? err.message : "操作失败"); }
   }
 
+  const [reviseBusy, setReviseBusy] = useState<string | null>(null);
+  async function aiRevise(commentId: string) {
+    setReviseBusy(commentId);
+    try {
+      await api(`/ai/manuscripts/${id}/comments/${commentId}/revise`, { method: "POST" });
+      load();
+      flash("AI 已按意见生成修改建议，请复核后采纳");
+    } catch (err) { flash(err instanceof Error ? err.message : "AI 改写失败"); }
+    finally { setReviseBusy(null); }
+  }
+
   async function runAI() {
     setAiBusy(true);
     try {
@@ -286,6 +297,11 @@ export default function ManuscriptPage() {
                             <button className="btn btn-sm" onClick={() => updateComment(c.id, "ACCEPTED")}>采纳建议</button>
                             <button className="btn btn-danger btn-sm" onClick={() => updateComment(c.id, "REJECTED")}>驳回</button>
                           </>
+                        )}
+                        {!c.suggestedText && !finalized && ms.myRole !== "AI_ASSISTANT" && (
+                          <button className="btn btn-sm" disabled={reviseBusy === c.id} onClick={() => aiRevise(c.id)}>
+                            {reviseBusy === c.id ? "AI 改写中…" : "🤖 让 AI 按此意见改写"}
+                          </button>
                         )}
                         <button className="btn btn-ghost btn-sm" onClick={() => updateComment(c.id, "RESOLVED")}>标记已解决</button>
                       </div>

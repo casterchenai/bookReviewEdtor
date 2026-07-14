@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { AI_PROVIDERS, sanitizeAiConfig } from "../lib/ai-providers.js";
 import { parseHtml, parseMarkdown } from "../lib/content.js";
+import { parsePdf } from "../lib/pdf.js";
 
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
@@ -104,7 +105,7 @@ projectsRouter.get("/:id", async (req: AuthedRequest, res) => {
       manuscripts: {
         orderBy: { order: "asc" },
         select: {
-          id: true, title: true, status: true, order: true, updatedAt: true,
+          id: true, title: true, status: true, order: true, section: true, updatedAt: true,
           _count: { select: { revisions: true, comments: { where: { status: "OPEN" } } } },
         },
       },
@@ -346,8 +347,8 @@ projectsRouter.post("/:id/manuscripts", async (req: AuthedRequest, res) => {
   const schema = z.object({
     title: z.string().min(1, "请填写章节标题").max(200),
     section: z.string().max(100).optional(),
-    sourceType: z.enum(["text", "html", "md"]).optional(),
-    source: z.string().max(8_000_000).optional(),
+    sourceType: z.enum(["text", "html", "md", "pdf"]).optional(),
+    source: z.string().max(30_000_000).optional(), // pdf 为 base64
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -355,10 +356,21 @@ projectsRouter.post("/:id/manuscripts", async (req: AuthedRequest, res) => {
   // 解析上传内容
   let content = "";
   let docJson = "";
-  if (parsed.data.source && parsed.data.sourceType && parsed.data.sourceType !== "text") {
-    const r = parsed.data.sourceType === "html" ? parseHtml(parsed.data.source) : parseMarkdown(parsed.data.source);
-    content = r.text;
-    docJson = JSON.stringify(r.doc);
+  if (parsed.data.source && parsed.data.sourceType === "html") {
+    const r = parseHtml(parsed.data.source);
+    content = r.text; docJson = JSON.stringify(r.doc);
+  } else if (parsed.data.source && parsed.data.sourceType === "md") {
+    const r = parseMarkdown(parsed.data.source);
+    content = r.text; docJson = JSON.stringify(r.doc);
+  } else if (parsed.data.source && parsed.data.sourceType === "pdf") {
+    try {
+      const buf = Buffer.from(parsed.data.source, "base64");
+      const r = await parsePdf(new Uint8Array(buf));
+      content = r.text; docJson = JSON.stringify(r.doc);
+    } catch (err) {
+      console.error("PDF parse failed:", err);
+      return res.status(400).json({ error: "PDF 解析失败，请确认文件有效" });
+    }
   } else if (parsed.data.source) {
     content = parsed.data.source;
   }

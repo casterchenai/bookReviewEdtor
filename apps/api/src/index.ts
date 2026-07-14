@@ -11,7 +11,7 @@ import { bootstrap } from "./bootstrap.js";
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "40mb" })); // 容纳 base64 编码的 PDF 上传
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.use("/api/auth", authRouter);
