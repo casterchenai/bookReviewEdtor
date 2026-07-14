@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== 用户与角色 =====
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  isAI         Boolean  @default(false) // AI 智能助手（系统内置账户）
+  createdAt    DateTime @default(now())
+
+  memberships ProjectMember[]
+  revisions   Revision[]
+  comments    Comment[]
+  ownedProjects Project[] @relation("ProjectOwner")
+}
+
+enum ProjectRole {
+  CHIEF_EDITOR // 主编：把控整体质量、制定修订标准、定稿
+  AGENT        // 文学经纪人：评估市场适配性、提出内容导向建议
+  REVIEWER     // 审校员：深度润色内容逻辑、表达风格、专业术语
+  AI_ASSISTANT // AI 智能助手：智能校对、语法纠错、用词优化
+}
+
+// ===== 项目（书稿项目）=====
+
+model Project {
+  id          String   @id @default(cuid())
+  title       String
+  description String   @default("")
+  standards   String   @default("") // 主编制定的修订标准
+  ownerId     String
+  owner       User     @relation("ProjectOwner", fields: [ownerId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     ProjectMember[]
+  manuscripts Manuscript[]
+  activities  Activity[]
+}
+
+model ProjectMember {
+  id        String      @id @default(cuid())
+  projectId String
+  userId    String
+  role      ProjectRole
+  createdAt DateTime    @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+}
+
+// ===== 书稿（章节）=====
+
+enum ManuscriptStatus {
+  DRAFT     // 草稿
+  IN_REVIEW // 审校中
+  FINALIZED // 已定稿（锁定，仅主编可解锁）
+}
+
+model Manuscript {
+  id        String           @id @default(cuid())
+  projectId String
+  title     String
+  order     Int              @default(0)
+  status    ManuscriptStatus @default(DRAFT)
+  content   String           @default("") // 当前内容（最新版本快照）
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revisions Revision[]
+  comments  Comment[]
+}
+
+// ===== 修订记录（全流程可追溯）=====
+
+model Revision {
+  id           String   @id @default(cuid())
+  manuscriptId String
+  number       Int      // 版本号，从 1 递增
+  authorId     String
+  authorRole   ProjectRole
+  content      String   // 该版本的完整内容快照
+  summary      String   @default("") // 修订说明/原因
+  createdAt    DateTime @default(now())
+
+  manuscript Manuscript @relation(fields: [manuscriptId], references: [id], onDelete: Cascade)
+  author     User       @relation(fields: [authorId], references: [id])
+
+  @@unique([manuscriptId, number])
+}
+
+// ===== 审阅意见与修改建议 =====
+
+enum CommentStatus {
+  OPEN     // 待处理
+  RESOLVED // 已解决
+  ACCEPTED // 建议已采纳
+  REJECTED // 建议已驳回
+}
+
+enum CommentCategory {
+  GENERAL   // 一般意见
+  GRAMMAR   // 语法纠错
+  WORDING   // 用词优化
+  LOGIC     // 逻辑问题
+  STYLE     // 表达风格
+  MARKET    // 市场适配
+  STANDARD  // 内容规范
+}
+
+model Comment {
+  id             String          @id @default(cuid())
+  manuscriptId   String
+  authorId       String
+  authorRole     ProjectRole
+  paragraphIndex Int             // 锚定的段落序号
+  quote          String          @default("") // 引用的原文片段
+  body           String          // 意见内容
+  category       CommentCategory @default(GENERAL)
+  suggestedText  String?         // 修改建议文本（可被主编一键采纳）
+  status         CommentStatus   @default(OPEN)
+  createdAt      DateTime        @default(now())
+
+  manuscript Manuscript @relation(fields: [manuscriptId], references: [id], onDelete: Cascade)
+  author     User       @relation(fields: [authorId], references: [id])
+}
+
+// ===== 操作日志 =====
+
+model Activity {
+  id        String   @id @default(cuid())
+  projectId String
+  actorName String
+  action    String
+  detail    String   @default("")
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
