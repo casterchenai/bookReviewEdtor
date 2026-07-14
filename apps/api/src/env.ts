@@ -15,6 +15,10 @@ export const env = {
     "postgresql://postgres:postgres@localhost:5502/bookreview",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
   aiModel: process.env.AI_MODEL || "claude-sonnet-5",
+  // 超级管理员凭据（存于环境变量）
+  superAdminEmail: process.env.SUPER_ADMIN_EMAIL || "admin@bookreview.local",
+  superAdminPassword: process.env.SUPER_ADMIN_PASSWORD || "admin12345",
+  superAdminName: process.env.SUPER_ADMIN_NAME || "超级管理员",
 };
 
 process.env.DATABASE_URL = env.databaseUrl;

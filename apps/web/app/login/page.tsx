@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, setSession } from "@/lib/api";
+import { api, setSession, type SessionUser } from "@/lib/api";
 
-type AuthResponse = { token: string; user: { id: string; name: string; email: string } };
+type AuthResponse = { token: string; user: SessionUser };
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,7 +24,7 @@ export default function LoginPage() {
         body: mode === "login" ? { email, password } : { email, password, name },
       });
       setSession(data.token, data.user);
-      router.push("/dashboard");
+      router.push(data.user.isSuperAdmin ? "/admin" : "/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "请求失败");
     } finally {

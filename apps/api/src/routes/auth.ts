@@ -23,7 +23,7 @@ authRouter.post("/register", async (req, res) => {
   const user = await prisma.user.create({
     data: { email, name, passwordHash: await bcrypt.hash(password, 10) },
   });
-  res.json({ token: signToken(user.id), user: { id: user.id, email, name } });
+  res.json({ token: signToken(user.id), user: publicUser(user) });
 });
 
 authRouter.post("/login", async (req, res) => {
@@ -32,11 +32,21 @@ authRouter.post("/login", async (req, res) => {
   if (!user || user.isAI || !(await bcrypt.compare(String(password ?? ""), user.passwordHash))) {
     return res.status(401).json({ error: "邮箱或密码错误" });
   }
-  res.json({ token: signToken(user.id), user: { id: user.id, email: user.email, name: user.name } });
+  res.json({ token: signToken(user.id), user: publicUser(user) });
 });
 
 authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.userId! } });
   if (!user) return res.status(404).json({ error: "用户不存在" });
-  res.json({ id: user.id, email: user.email, name: user.name });
+  res.json(publicUser(user));
 });
+
+function publicUser(u: { id: string; email: string; name: string; isSuperAdmin: boolean; canCreateBooks: boolean }) {
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    isSuperAdmin: u.isSuperAdmin,
+    canCreateBooks: u.canCreateBooks,
+  };
+}

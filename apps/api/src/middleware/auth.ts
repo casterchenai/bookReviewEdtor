@@ -26,6 +26,14 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   }
 }
 
+/** 仅超级管理员可访问 */
+export async function requireSuperAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
+  if (!req.userId) return res.status(401).json({ error: "未登录" });
+  const user = await prisma.user.findUnique({ where: { id: req.userId } });
+  if (!user?.isSuperAdmin) return res.status(403).json({ error: "需要超级管理员权限" });
+  next();
+}
+
 /** 返回用户在项目中的角色；非成员返回 null */
 export async function memberRole(projectId: string, userId: string): Promise<ProjectRole | null> {
   const m = await prisma.projectMember.findUnique({

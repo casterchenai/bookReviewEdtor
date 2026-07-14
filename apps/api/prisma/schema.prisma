@@ -10,12 +10,14 @@ datasource db {
 // ===== 用户与角色 =====
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  isAI         Boolean  @default(false) // AI 智能助手（系统内置账户）
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  isAI          Boolean  @default(false) // AI 智能助手（系统内置账户）
+  isSuperAdmin  Boolean  @default(false) // 超级管理员（凭据存于环境变量）
+  canCreateBooks Boolean @default(true)  // 是否有创建书稿项目的权限
+  createdAt     DateTime @default(now())
 
   memberships ProjectMember[]
   revisions   Revision[]
@@ -23,11 +25,50 @@ model User {
   ownedProjects Project[] @relation("ProjectOwner")
 }
 
+// 角色能力原型：动态角色（BookRole）在此四种能力之上叠加可编辑的显示名
 enum ProjectRole {
-  CHIEF_EDITOR // 主编：把控整体质量、制定修订标准、定稿
-  AGENT        // 文学经纪人：评估市场适配性、提出内容导向建议
+  CHIEF_EDITOR // 主编/书管理员：把控整体质量、制定修订标准、定稿、管理成员与角色、配置本书 AI
+  AGENT        // 内容顾问：评估内容导向、提出建议（可编辑内容、提交意见）
   REVIEWER     // 审校员：深度润色内容逻辑、表达风格、专业术语
   AI_ASSISTANT // AI 智能助手：智能校对、语法纠错、用词优化
+}
+
+// AI 供应商
+enum AiProvider {
+  AUTO      // 自动：按可用配置选择
+  OPENAI
+  GLM       // 智谱 GLM
+  DEEPSEEK
+  ANTHROPIC // Claude
+}
+
+// 每本书可自定义的角色（显示名可编辑，能力基于 ProjectRole 原型）
+model BookRole {
+  id        String      @id @default(cuid())
+  projectId String
+  name      String      // 可编辑的显示名，如「主编」「特邀审校」「市场顾问」
+  base      ProjectRole // 能力原型，决定权限
+  order     Int         @default(0)
+  isDefault Boolean     @default(false) // 建书时自动创建的默认角色
+  createdAt DateTime    @default(now())
+
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  members ProjectMember[]
+
+  @@unique([projectId, name])
+}
+
+// AI 配置：全局单例（projectId 为 null）或每本书覆盖（projectId 指向 Project）
+model AiConfig {
+  id        String     @id @default(cuid())
+  projectId String?    @unique // null = 全局默认配置；非 null = 该书的专属配置
+  provider  AiProvider @default(AUTO)
+  model     String     @default("") // 具体模型 ID，如 gpt-4o、glm-4.6、deepseek-chat、claude-sonnet-5
+  apiKey    String     @default("") // 该供应商的 API Key（为空则回退到环境变量）
+  baseUrl   String     @default("") // 自定义端点（OpenAI 兼容），为空用供应商默认
+  updatedAt DateTime   @updatedAt
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 // ===== 项目（书稿项目）=====
@@ -45,17 +86,21 @@ model Project {
   members     ProjectMember[]
   manuscripts Manuscript[]
   activities  Activity[]
+  bookRoles   BookRole[]
+  aiConfig    AiConfig?
 }
 
 model ProjectMember {
-  id        String      @id @default(cuid())
-  projectId String
-  userId    String
-  role      ProjectRole
-  createdAt DateTime    @default(now())
+  id         String      @id @default(cuid())
+  projectId  String
+  userId     String
+  role       ProjectRole // 能力原型（鉴权依据，向后兼容）
+  bookRoleId String?     // 关联的可编辑角色（展示名）
+  createdAt  DateTime    @default(now())
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookRole BookRole? @relation(fields: [bookRoleId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, userId])
 }

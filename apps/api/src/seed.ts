@@ -58,15 +58,25 @@ async function main() {
       standards:
         "1. 全书统一使用简体中文规范用字，数字用法遵循 GB/T 15835。\n2. 人物姓名、地名前后必须一致（主角：沈知微）。\n3. 避免口语化冗余表达，保持文学性叙事风格。\n4. 每章修订必须填写修订说明，重大改动需附原因。",
       ownerId: chief.id,
-      members: {
+      bookRoles: {
         create: [
-          { userId: chief.id, role: "CHIEF_EDITOR" },
-          { userId: agent.id, role: "AGENT" },
-          { userId: reviewer.id, role: "REVIEWER" },
-          { userId: ai.id, role: "AI_ASSISTANT" },
+          { name: "主编", base: "CHIEF_EDITOR", order: 0, isDefault: true },
+          { name: "文学经纪人", base: "AGENT", order: 1, isDefault: true },
+          { name: "审校员", base: "REVIEWER", order: 2, isDefault: true },
+          { name: "AI 智能助手", base: "AI_ASSISTANT", order: 3, isDefault: true },
         ],
       },
     },
+    include: { bookRoles: true },
+  });
+  const roleByBase = new Map(project.bookRoles.map((r) => [r.base, r.id]));
+  await prisma.projectMember.createMany({
+    data: [
+      { projectId: project.id, userId: chief.id, role: "CHIEF_EDITOR", bookRoleId: roleByBase.get("CHIEF_EDITOR") },
+      { projectId: project.id, userId: agent.id, role: "AGENT", bookRoleId: roleByBase.get("AGENT") },
+      { projectId: project.id, userId: reviewer.id, role: "REVIEWER", bookRoleId: roleByBase.get("REVIEWER") },
+      { projectId: project.id, userId: ai.id, role: "AI_ASSISTANT", bookRoleId: roleByBase.get("AI_ASSISTANT") },
+    ],
   });
 
   const manuscript = await prisma.manuscript.create({

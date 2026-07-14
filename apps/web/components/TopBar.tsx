@@ -13,6 +13,11 @@ export default function TopBar() {
           BookReviewEditor<small>图书出版前协同审校平台</small>
         </Link>
         <div className="topbar-spacer" />
+        {user?.isSuperAdmin && (
+          <Link href="/admin" className="btn btn-ghost btn-sm" style={{ marginRight: 8 }}>
+            管理后台
+          </Link>
+        )}
         {user && <span className="user">{user.name}</span>}
         <button
           className="btn btn-ghost btn-sm"

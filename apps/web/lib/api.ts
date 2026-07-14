@@ -6,12 +6,17 @@ export function getToken() {
   return localStorage.getItem("bre_token");
 }
 
-export function setSession(token: string, user: { id: string; name: string; email: string }) {
+export type SessionUser = {
+  id: string; name: string; email: string;
+  isSuperAdmin?: boolean; canCreateBooks?: boolean;
+};
+
+export function setSession(token: string, user: SessionUser) {
   localStorage.setItem("bre_token", token);
   localStorage.setItem("bre_user", JSON.stringify(user));
 }
 
-export function getUser(): { id: string; name: string; email: string } | null {
+export function getUser(): SessionUser | null {
   if (typeof window === "undefined") return null;
   const raw = localStorage.getItem("bre_user");
   return raw ? JSON.parse(raw) : null;
