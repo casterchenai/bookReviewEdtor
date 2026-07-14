@@ -228,6 +228,7 @@ button { font-family: inherit; }
 .upload-drop:hover { border-color: var(--primary); background: var(--primary-tint); }
 
 /* 管理后台用户表 */
+.linkbtn { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 0.76rem; margin-left: 6px; padding: 0; text-decoration: underline; }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .admin-table th { text-align: left; color: var(--ink-soft); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--edge); font-size: 0.8rem; }
 .admin-table td { padding: 10px; border-bottom: 1px dashed var(--edge); vertical-align: top; }
