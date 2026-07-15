@@ -66,7 +66,7 @@ export default function LoginPage() {
         </div>
         <div className="demo-tip">
           演示账户（密码均为 demo1234）：<br />
-          主编 chief@demo.com · 经纪人 agent@demo.com · 审校员 reviewer@demo.com
+          起草 chief@demo.com · 监制 agent@demo.com · 审校员 reviewer@demo.com
         </div>
       </div>
     </div>
