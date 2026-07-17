@@ -35,25 +35,30 @@ const BLOCK_TAG: Record<string, string> = {
 
 // ===== 只读渲染（可点击选中以评论）=====
 export function RichDocView({
-  blocks, selectedIndex, onSelect, countByIndex,
+  blocks, selectedIndex, onSelect, countByIndex, idPrefix, renderAfter,
 }: {
   blocks: Block[];
   selectedIndex: number | null;
   onSelect: (i: number) => void;
   countByIndex: Map<number, number>;
+  idPrefix?: string;
+  renderAfter?: (i: number) => React.ReactNode;
 }) {
   return (
     <div className="manuscript-body rich">
       {blocks.map((b, i) => (
-        <div
-          key={i}
-          className={`rich-block ${selectedIndex === i ? "selected" : ""} ${countByIndex.has(i) ? "has-comments" : ""}`}
-          data-count={countByIndex.get(i) ?? ""}
-          title="点击以对此块发表审阅意见"
-          onClick={() => onSelect(i)}
-        >
-          <span className="p-index">¶{i + 1}{b.type !== "para" && b.type !== "heading" ? ` ${BLOCK_TAG[b.type] ?? ""}` : ""}</span>
-          <BlockBody b={b} />
+        <div key={i}>
+          <div
+            id={idPrefix ? `${idPrefix}${i}` : undefined}
+            className={`rich-block ${selectedIndex === i ? "selected" : ""} ${countByIndex.has(i) ? "has-comments" : ""}`}
+            data-count={countByIndex.get(i) ?? ""}
+            title="点击以对此块发表审阅意见"
+            onClick={() => onSelect(i)}
+          >
+            <span className="p-index">¶{i + 1}{b.type !== "para" && b.type !== "heading" ? ` ${BLOCK_TAG[b.type] ?? ""}` : ""}</span>
+            <BlockBody b={b} />
+          </div>
+          {renderAfter?.(i)}
         </div>
       ))}
     </div>

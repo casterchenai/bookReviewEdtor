@@ -163,7 +163,7 @@ manuscriptsRouter.post("/:id/rollback", async (req: AuthedRequest, res) => {
   if (!target) return res.status(404).json({ error: "版本不存在" });
 
   const revision = await createRevision(
-    manuscript.id, req.userId!, role, target.content, `回滚至第 ${target.number} 版`,
+    manuscript.id, req.userId!, role, target.content, `回滚至第 ${target.number} 版`, target.docJson,
   );
   const me = await prisma.user.findUnique({ where: { id: req.userId! } });
   await logActivity(manuscript.projectId, me!.name, "回滚版本", `《${manuscript.title}》→ 第 ${target.number} 版`);

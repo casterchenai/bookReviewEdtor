@@ -184,6 +184,47 @@ button { font-family: inherit; }
 .auth-switch { text-align: center; margin-top: 16px; font-size: 0.85rem; color: var(--ink-soft); }
 .demo-tip { background: var(--primary-tint); border-radius: 8px; padding: 10px 14px; font-size: 0.8rem; margin-top: 20px; color: var(--primary-deep); }
 
+/* 审校工作区：正文 + 右侧对齐批注栏 */
+.review-workspace { display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: 16px; align-items: start; }
+.doc-col { padding-left: 44px; position: relative; }
+.margin-col { position: relative; }
+.comment-margin { position: relative; }
+.comment-margin .empty.small { font-size: 0.82rem; padding: 20px 8px; }
+.margin-card {
+  position: absolute; left: 0; right: 0; background: var(--panel); border: 1px solid var(--edge);
+  border-radius: 8px; padding: 8px 10px; font-size: 0.82rem; cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: box-shadow 0.15s, border-color 0.15s;
+}
+.margin-card.ai { border-left: 3px solid var(--primary); }
+.margin-card.resolved { opacity: 0.6; }
+.margin-card.active { border-color: var(--warn); box-shadow: 0 3px 10px rgba(0,0,0,0.12); z-index: 5; }
+.margin-card.open { z-index: 10; box-shadow: 0 6px 20px rgba(0,0,0,0.18); }
+.mc-head { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.mc-who { font-weight: 600; font-size: 0.8rem; }
+.mc-role { font-size: 0.68rem; }
+.mc-anchor { color: var(--ink-soft); font-size: 0.72rem; margin-left: auto; }
+.mc-preview { color: var(--ink-soft); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-full { margin-top: 6px; }
+.mc-full .comment-body { font-size: 0.85rem; margin: 4px 0; white-space: pre-wrap; }
+
+/* 就近弹出的批注编辑器 */
+.inline-composer {
+  margin: 6px 0 12px 8px; padding: 12px; border: 1px solid var(--warn); border-radius: 8px;
+  background: var(--warn-tint); display: flex; flex-direction: column; gap: 8px;
+}
+.inline-composer .ic-title { font-weight: 700; font-size: 0.9rem; }
+
+/* 弹层 */
+.modal-overlay { position: fixed; inset: 0; background: rgba(38,41,46,0.45); z-index: 50; display: grid; place-items: center; padding: 24px; }
+.modal-card { max-width: 820px; width: 100%; max-height: 82vh; overflow: auto; }
+
+/* 版本对比条 + 提交日志 */
+.cmp-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px; background: var(--primary-tint); border-radius: 8px; margin-bottom: 12px; }
+.commit-log { position: relative; }
+.commit-item { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--edge); }
+.commit-item:last-child { border-bottom: 0; }
+.commit-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--primary); margin-top: 5px; flex: none; box-shadow: 0 0 0 3px var(--primary-tint); }
+
 /* 结构化富内容块 */
 .manuscript-body.rich { line-height: 1.9; }
 .rich-block { position: relative; padding: 6px 6px 6px 44px; border-radius: 8px; cursor: pointer; transition: background 0.12s; }
