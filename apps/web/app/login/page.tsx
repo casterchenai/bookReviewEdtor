@@ -36,7 +36,7 @@ export default function LoginPage() {
     <div className="auth-wrap">
       <div className="auth-card">
         <div className="logo">BookReviewEditor</div>
-        <div className="slogan">主编 · 文学经纪人 · AI 智能助手 · 审校员 —— 协同打磨每一部书稿</div>
+        <div className="slogan">起草 · 监制 · AI 智能助手 · 审校员 —— 协同打磨每一部书稿</div>
         <form onSubmit={submit}>
           {mode === "register" && (
             <div className="field">
