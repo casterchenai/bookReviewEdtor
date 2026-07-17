@@ -37,6 +37,11 @@ export default function ManuscriptPage() {
   const [commentCategory, setCommentCategory] = useState("GENERAL");
   const [suggestText, setSuggestText] = useState("");
   const [withSuggestion, setWithSuggestion] = useState(false);
+  const [scanOthers, setScanOthers] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
+  const [suggestBusy, setSuggestBusy] = useState(false);
+  const [acceptAllOpen, setAcceptAllOpen] = useState(false);
+  const [acceptAllSummary, setAcceptAllSummary] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [reviseBusy, setReviseBusy] = useState<string | null>(null);
   const [diffView, setDiffView] = useState<{ title: string; a: string; b: string } | null>(null);
@@ -82,19 +87,71 @@ export default function ManuscriptPage() {
 
   async function submitComment() {
     if (selectedPara === null) return;
+    const opinion = commentBody, category = commentCategory, doScan = scanOthers;
     try {
       await api(`/manuscripts/${id}/comments`, {
         method: "POST",
         body: {
           paragraphIndex: selectedPara,
           quote: unitText(selectedPara)?.slice(0, 30) ?? "",
-          body: commentBody, category: commentCategory,
+          body: opinion, category,
           suggestedText: withSuggestion && suggestText.trim() ? suggestText : undefined,
         },
       });
-      setCommentBody(""); setSuggestText(""); setWithSuggestion(false); setSelectedPara(null);
+      setCommentBody(""); setSuggestText(""); setWithSuggestion(false); setScanOthers(false); setSelectedPara(null);
       load(); flash("意见已提交");
+      if (doScan) scanOtherChapters(opinion, category);
     } catch (err) { flash(err instanceof Error ? err.message : "提交失败"); }
+  }
+
+  async function optimizeComment() {
+    if (!commentBody.trim()) return;
+    setOptimizing(true);
+    try {
+      const r = await api<{ text: string }>(`/ai/manuscripts/${id}/optimize`, { method: "POST", body: { text: commentBody } });
+      setCommentBody(r.text); flash("已优化意见表达");
+    } catch (err) { flash(err instanceof Error ? err.message : "优化失败"); }
+    finally { setOptimizing(false); }
+  }
+
+  async function toggleWithSuggestion(checked: boolean) {
+    setWithSuggestion(checked);
+    if (!checked) { setSuggestText(""); return; }
+    if (selectedPara === null) return;
+    if (commentBody.trim()) {
+      // 有意见：AI 按意见生成修改后的整段，作为默认值（可继续编辑）
+      setSuggestBusy(true);
+      try {
+        const r = await api<{ suggestedText: string }>(`/ai/manuscripts/${id}/suggest`, { method: "POST", body: { paragraphIndex: selectedPara, opinion: commentBody } });
+        setSuggestText(r.suggestedText);
+      } catch (err) { flash(err instanceof Error ? err.message : "AI 生成失败"); setSuggestText(unitText(selectedPara)); }
+      finally { setSuggestBusy(false); }
+    } else {
+      // 无意见：展开为原文，供直接编辑
+      setSuggestText(unitText(selectedPara));
+    }
+  }
+
+  async function scanOtherChapters(opinion: string, category: string) {
+    try {
+      const proj = await api<{ manuscripts: { id: string; status: string }[] }>(`/projects/${ms!.project.id}`);
+      const others = proj.manuscripts.filter((m) => m.id !== id && m.status !== "FINALIZED");
+      if (others.length === 0) return;
+      let total = 0;
+      for (let k = 0; k < others.length; k++) {
+        flash(`检查其他章节同类问题 ${k + 1}/${others.length}…`);
+        try { const r = await api<{ count: number }>(`/ai/manuscripts/${others[k].id}/scan-issue`, { method: "POST", body: { opinion, category } }); total += r.count; } catch { /* 单章失败继续 */ }
+      }
+      flash(`同类问题检查完成：其他章节共新增 ${total} 条意见`);
+    } catch { flash("跨章节检查未完成"); }
+  }
+
+  async function acceptAll() {
+    try {
+      const r = await api<{ count: number }>(`/manuscripts/${id}/accept-all`, { method: "POST", body: { summary: acceptAllSummary.trim() || undefined } });
+      setAcceptAllOpen(false); setAcceptAllSummary(""); revCache.current.clear(); load();
+      flash(`已全部采纳 ${r.count} 条建议并生成新版本`);
+    } catch (err) { flash(err instanceof Error ? err.message : "全部采纳失败"); }
   }
 
   async function updateComment(commentId: string, status: string) {
@@ -164,16 +221,33 @@ export default function ManuscriptPage() {
           {Object.entries(CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <textarea className="textarea" rows={2} placeholder="意见内容…" value={commentBody} onChange={(e) => setCommentBody(e.target.value)} autoFocus />
+        <div className="ic-row">
+          <button className="btn btn-ghost btn-sm" disabled={optimizing || !commentBody.trim()} onClick={optimizeComment}>
+            {optimizing ? "优化中…" : "🤖 AI 优化"}
+          </button>
+          <label className="small" style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input type="checkbox" checked={scanOthers} onChange={(e) => setScanOthers(e.target.checked)} />
+            顺带查其他章节同类问题
+          </label>
+        </div>
         <label className="small" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input type="checkbox" checked={withSuggestion} onChange={(e) => setWithSuggestion(e.target.checked)} />
-          附带修改建议（主编可一键采纳，整段替换）
+          <input type="checkbox" checked={withSuggestion} onChange={(e) => toggleWithSuggestion(e.target.checked)} />
+          附带修改建议（主编可一键采纳，整段替换）{suggestBusy && " · AI 生成中…"}
         </label>
         {withSuggestion && (
-          <textarea className="textarea editor-area" style={{ minHeight: 100 }} placeholder="修改后的整段文本…" value={suggestText || unitText(i)} onChange={(e) => setSuggestText(e.target.value)} />
+          <>
+            <textarea className="textarea editor-area" style={{ minHeight: 90 }} placeholder="修改后的整段文本…" value={suggestText} onChange={(e) => setSuggestText(e.target.value)} />
+            <div className="suggest-diff-label">修改痕迹（荧光笔高亮，对比原文实时更新）</div>
+            <div className="suggest-diff">
+              {diffChars(unitText(i), suggestText).map((part, k) => (
+                <span key={k} className={part.added ? "hl-add" : part.removed ? "hl-del" : ""}>{part.value}</span>
+              ))}
+            </div>
+          </>
         )}
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-sm" onClick={submitComment} disabled={!commentBody.trim()}>提交意见</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setSelectedPara(null)}>取消</button>
+          <button className="btn btn-sm" onClick={submitComment} disabled={!commentBody.trim() || suggestBusy}>提交意见</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSelectedPara(null); setWithSuggestion(false); setScanOthers(false); setSuggestText(""); }}>取消</button>
         </div>
       </div>
     ) : null;
@@ -213,6 +287,11 @@ export default function ManuscriptPage() {
                 <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(ms.content); setDraftBlocks(docBlocks ? JSON.parse(JSON.stringify(docBlocks)) : []); setSelectedPara(null); setEditing(true); }}>进入编辑</button>
               )}
               <button className="btn btn-sm" onClick={runAI} disabled={aiBusy || editing}>{aiBusy ? "AI 审校中…" : "🤖 AI 智能审校"}</button>
+              {isChief && !finalized && openComments.some((c) => c.suggestedText) && (
+                <button className="btn btn-sm" onClick={() => setAcceptAllOpen(true)} disabled={editing}>
+                  ✓ 全部采纳（{openComments.filter((c) => c.suggestedText).length}）
+                </button>
+              )}
             </div>
 
             {editing ? (
@@ -327,6 +406,27 @@ export default function ManuscriptPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 全部采纳对话框 */}
+        {acceptAllOpen && (
+          <div className="modal-overlay" onClick={() => setAcceptAllOpen(false)}>
+            <div className="card modal-card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{ marginTop: 0 }}>全部采纳修改建议</h2>
+              <p className="muted small">
+                将采纳全部 {openComments.filter((c) => c.suggestedText).length} 条含修改建议的待处理意见，合并应用并生成一个新版本（历史保留，可回退）。
+              </p>
+              <div className="field">
+                <label>版本说明（可选）</label>
+                <textarea className="textarea" rows={2} value={acceptAllSummary} onChange={(e) => setAcceptAllSummary(e.target.value)}
+                  placeholder="留空则自动汇总，例如：采纳 主编 3 条、审校员 2 条修订意见" />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={acceptAll}>确认全部采纳</button>
+                <button className="btn btn-ghost" onClick={() => setAcceptAllOpen(false)}>取消</button>
               </div>
             </div>
           </div>

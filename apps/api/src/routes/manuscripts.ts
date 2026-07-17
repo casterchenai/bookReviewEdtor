@@ -186,6 +186,62 @@ manuscriptsRouter.post("/:id/finalize", async (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
+// 全部采纳：一次性采纳所有含建议的待处理意见，合并生成一个新版本
+manuscriptsRouter.post("/:id/accept-all", async (req: AuthedRequest, res) => {
+  const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
+  if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可采纳修改建议" });
+  if (manuscript.status === "FINALIZED") return res.status(409).json({ error: "已定稿书稿不可修改" });
+
+  const schema = z.object({ summary: z.string().max(500).optional() });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: "参数错误" });
+
+  // 待采纳：含建议、待处理，按段落顺序 + 提交时间应用（同段后者覆盖前者）
+  const pending = await prisma.comment.findMany({
+    where: { manuscriptId: manuscript.id, status: "OPEN", suggestedText: { not: null } },
+    orderBy: [{ paragraphIndex: "asc" }, { createdAt: "asc" }],
+  });
+  if (pending.length === 0) return res.status(400).json({ error: "没有可采纳的修改建议" });
+
+  // 应用到内容
+  let content: string;
+  let docJson = "";
+  if (manuscript.docJson) {
+    const doc = normalizeDoc(JSON.parse(manuscript.docJson));
+    if (!doc) return res.status(500).json({ error: "内容解析失败" });
+    for (const c of pending) {
+      if (c.paragraphIndex < doc.blocks.length && c.suggestedText != null) {
+        doc.blocks[c.paragraphIndex] = setBlockText(doc.blocks[c.paragraphIndex] as Block, c.suggestedText);
+      }
+    }
+    content = blocksToText(doc.blocks);
+    docJson = JSON.stringify(doc);
+  } else {
+    const paragraphs = manuscript.content.split(/\n\n/);
+    for (const c of pending) {
+      if (c.paragraphIndex < paragraphs.length && c.suggestedText != null) paragraphs[c.paragraphIndex] = c.suggestedText;
+    }
+    content = paragraphs.join("\n\n");
+  }
+
+  // 版本说明：留空则自动汇总各角色采纳条数
+  const summary = parsed.data.summary?.trim() || autoAcceptSummary(pending.map((c) => c.authorRole));
+
+  await createRevision(manuscript.id, req.userId!, role, content, summary, docJson);
+  await prisma.comment.updateMany({ where: { id: { in: pending.map((c) => c.id) } }, data: { status: "ACCEPTED" } });
+  const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+  await logActivity(manuscript.projectId, me!.name, "全部采纳", `《${manuscript.title}》${pending.length} 条建议`);
+  res.json({ ok: true, count: pending.length, summary });
+});
+
+function autoAcceptSummary(roles: string[]): string {
+  const tally = new Map<string, number>();
+  for (const r of roles) tally.set(r, (tally.get(r) ?? 0) + 1);
+  const parts = [...tally.entries()].map(([r, n]) => `${roleLabel(r)} ${n} 条`);
+  return `采纳 ${parts.join("、")}修订意见`;
+}
+
 // 提交审阅意见 / 修改建议
 manuscriptsRouter.post("/:id/comments", async (req: AuthedRequest, res) => {
   const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);

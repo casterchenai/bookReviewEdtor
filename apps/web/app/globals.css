@@ -213,6 +213,12 @@ button { font-family: inherit; }
   background: var(--warn-tint); display: flex; flex-direction: column; gap: 8px;
 }
 .inline-composer .ic-title { font-weight: 700; font-size: 0.9rem; }
+.inline-composer .ic-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.suggest-diff-label { font-size: 0.74rem; color: var(--ink-soft); margin-top: 2px; }
+.suggest-diff { font-size: 0.86rem; line-height: 1.7; white-space: pre-wrap; background: var(--panel); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; max-height: 160px; overflow: auto; }
+.suggest-diff .hl-add { background: #fff3a0; border-radius: 2px; padding: 0 1px; }
+.suggest-diff .hl-del { color: #b3321c; text-decoration: line-through; opacity: 0.7; }
+:root[data-theme="dark"] .suggest-diff .hl-add { background: #6b5d16; color: #fff; }
 
 /* 弹层 */
 .modal-overlay { position: fixed; inset: 0; background: rgba(38,41,46,0.45); z-index: 50; display: grid; place-items: center; padding: 24px; }

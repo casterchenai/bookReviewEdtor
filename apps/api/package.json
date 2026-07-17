@@ -20,6 +20,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "jsonrepair": "^3.15.0",
     "jsonwebtoken": "^9.0.2",
     "marked": "^18.0.6",
     "pdfjs-dist": "^6.1.200",

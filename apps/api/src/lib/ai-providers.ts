@@ -2,6 +2,7 @@
 // 配置优先级：书稿专属 → 全局默认 → 环境变量。
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { jsonrepair } from "jsonrepair";
 import { z } from "zod";
 import type { AiProvider } from "@prisma/client";
 import { prisma } from "../db.js";
@@ -203,6 +204,7 @@ async function reviewWithOpenAICompatible(cfg: ResolvedAi, system: string, userM
         { role: "user", content: userMsg },
       ],
       temperature: 0.3,
+      max_tokens: 8000,
       response_format: { type: "json_object" },
     }),
   });
@@ -212,12 +214,8 @@ async function reviewWithOpenAICompatible(cfg: ResolvedAi, system: string, userM
   }
   const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
   const content = data.choices?.[0]?.message?.content ?? "";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(extractJson(content));
-  } catch {
-    throw new Error("AI 返回结果解析失败（非 JSON）");
-  }
+  const parsed = parseLenientJson(content);
+  if (parsed === null) throw new Error("AI 返回结果解析失败（非 JSON）");
   const result = SuggestionSchema.safeParse(parsed);
   if (!result.success) {
     // 容错：部分模型可能直接返回数组
@@ -228,24 +226,19 @@ async function reviewWithOpenAICompatible(cfg: ResolvedAi, system: string, userM
   return result.data.suggestions;
 }
 
-// ===== 按审阅意见改写单段文本（AI 辅助采纳）=====
-export async function runRewrite(cfg: ResolvedAi, original: string, opinion: string, standards: string): Promise<string> {
-  const standardsBlock = standards.trim() ? `\n\n须遵循的修订标准：\n${standards}` : "";
-  const system = `你是资深图书审校编辑。请根据给定的审阅意见改写这段文本。要求：只输出改写后的完整文本，不要解释、不要加引号或标注。保持原文风格与未涉及部分不变，仅针对意见所指问题修改。${standardsBlock}`;
-  const user = `【审阅意见】\n${opinion}\n\n【原文】\n${original}`;
-
+// ===== 通用纯文本补全（供应商无关）=====
+export async function runText(cfg: ResolvedAi, system: string, user: string, maxTokens = 4000): Promise<string> {
   if (cfg.provider === "ANTHROPIC") {
     const client = new Anthropic({ apiKey: cfg.apiKey });
     const resp = await client.messages.create({
       model: cfg.model || "claude-sonnet-5",
-      max_tokens: 4000,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content: user }],
     });
     const block = resp.content.find((b) => b.type === "text");
     return block && block.type === "text" ? block.text.trim() : "";
   }
-
   const base = cfg.baseUrl.replace(/\/$/, "");
   const resp = await fetch(`${base}/chat/completions`, {
     method: "POST",
@@ -254,6 +247,7 @@ export async function runRewrite(cfg: ResolvedAi, original: string, opinion: str
       model: cfg.model,
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       temperature: 0.4,
+      max_tokens: maxTokens,
     }),
   });
   if (!resp.ok) {
@@ -262,6 +256,49 @@ export async function runRewrite(cfg: ResolvedAi, original: string, opinion: str
   }
   const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
   return (data.choices?.[0]?.message?.content ?? "").trim();
+}
+
+// ===== 按审阅意见改写单段文本（AI 辅助采纳）=====
+export async function runRewrite(cfg: ResolvedAi, original: string, opinion: string, standards: string): Promise<string> {
+  const standardsBlock = standards.trim() ? `\n\n须遵循的修订标准：\n${standards}` : "";
+  const system = `你是资深图书审校编辑。请根据给定的审阅意见改写这段文本。要求：只输出改写后的完整文本，不要解释、不要加引号或标注。保持原文风格与未涉及部分不变，仅针对意见所指问题修改。${standardsBlock}`;
+  return runText(cfg, system, `【审阅意见】\n${opinion}\n\n【原文】\n${original}`);
+}
+
+// ===== 优化一条审阅意见的表达 =====
+export async function runOptimizeComment(cfg: ResolvedAi, text: string): Promise<string> {
+  const system = `你是资深图书审校编辑。请优化下面这条审阅意见的表达，使其更专业、准确、简练、可执行。只输出优化后的意见文字本身，不要解释、不要加引号。`;
+  return runText(cfg, system, text, 1000);
+}
+
+// ===== 在一章中查找与给定意见同类的问题，返回结构化建议 =====
+export async function runScanIssue(cfg: ResolvedAi, paragraphs: string[], opinion: string, standards: string): Promise<Suggestion[]> {
+  const standardsBlock = standards.trim() ? `\n\n本项目修订标准：\n${standards}` : "";
+  const schemaHint = `请仅输出 JSON：{"suggestions":[{"paragraphIndex":number,"quote":string,"category":"GRAMMAR"|"WORDING"|"LOGIC"|"STANDARD"|"STYLE","issue":string,"suggestedParagraph":string}]}。若本章没有同类问题，返回 {"suggestions":[]}。`;
+  const system = `你是资深图书审校专家。下面给出一条在其他章节发现的问题意见，请在本章内查找**同类**问题（相同性质，不必字面相同），逐段核对，只报告确实存在的同类问题，最多 8 条。${standardsBlock}\n\n${schemaHint}`;
+  const numbered = paragraphs.map((p, i) => `【第 ${i} 段】\n${p}`).join("\n\n");
+  const user = `【需要在本章排查的同类问题】\n${opinion}\n\n【本章内容】\n${numbered}`;
+  const content = await runText(cfg, system, user, 8000);
+  const parsed = parseLenientJson(content);
+  if (!parsed) return [];
+  const result = SuggestionSchema.safeParse(parsed);
+  if (result.success) return result.data.suggestions;
+  const arr = z.array(SuggestionSchema.shape.suggestions.element).safeParse(parsed);
+  return arr.success ? arr.data : [];
+}
+
+// 宽松解析 LLM 返回的 JSON：先直接解析，失败则用 jsonrepair 修复（未转义引号/换行/尾逗号等）
+function parseLenientJson(content: string): unknown | null {
+  const text = extractJson(content);
+  try {
+    return JSON.parse(text);
+  } catch {
+    try {
+      return JSON.parse(jsonrepair(text));
+    } catch {
+      return null;
+    }
+  }
 }
 
 // 从可能带 ```json 包裹的文本中提取 JSON 主体
