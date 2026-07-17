@@ -128,6 +128,8 @@ model Manuscript {
   project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   revisions Revision[]
   comments  Comment[]
+
+  @@index([projectId])
 }
 
 // ===== 修订记录（全流程可追溯）=====
@@ -147,6 +149,7 @@ model Revision {
   author     User       @relation(fields: [authorId], references: [id])
 
   @@unique([manuscriptId, number])
+  @@index([authorId])
 }
 
 // ===== 审阅意见与修改建议 =====
@@ -183,6 +186,9 @@ model Comment {
 
   manuscript Manuscript @relation(fields: [manuscriptId], references: [id], onDelete: Cascade)
   author     User       @relation(fields: [authorId], references: [id])
+
+  @@index([manuscriptId])
+  @@index([authorId])
 }
 
 // ===== 操作日志 =====
@@ -196,4 +202,6 @@ model Activity {
   createdAt DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
 }

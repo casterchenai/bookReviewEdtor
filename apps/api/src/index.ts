@@ -1,6 +1,7 @@
 import "./env.js";
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import { env } from "./env.js";
 import { authRouter } from "./routes/auth.js";
 import { projectsRouter } from "./routes/projects.js";
@@ -10,6 +11,7 @@ import { adminRouter } from "./routes/admin.js";
 import { bootstrap } from "./bootstrap.js";
 
 const app = express();
+app.use(compression()); // gzip 响应，显著减小 JSON 传输体积
 app.use(cors());
 app.use(express.json({ limit: "40mb" })); // 容纳 base64 编码的 PDF 上传
 
