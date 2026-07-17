@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, setSession, type SessionUser } from "@/lib/api";
+import { api, setSession, getToken, type SessionUser } from "@/lib/api";
 
 type AuthResponse = { token: string; user: SessionUser };
 
@@ -13,6 +13,9 @@ export default function LoginPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // 已登录用户直接进入工作台
+  useEffect(() => { if (getToken()) router.replace("/dashboard"); }, [router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
