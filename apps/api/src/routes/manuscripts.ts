@@ -7,6 +7,9 @@ import {
   blocksToText, normalizeDoc, setBlockText, type Block,
   blocksToMarkdown, blocksToHtml, textToMarkdown, textToHtml,
 } from "../lib/content.js";
+import { manuscriptToDocx } from "../lib/docx.js";
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 // 将书稿渲染为 Markdown / HTML（有块用块，否则用纯文本投影）
 export function renderManuscript(m: { title: string; content: string; docJson: string }, format: "md" | "html"): string {
@@ -76,11 +79,19 @@ manuscriptsRouter.patch("/:id/title", async (req: AuthedRequest, res) => {
   res.json({ ok: true, title: parsed.data.title });
 });
 
-// 导出单章为 Markdown / HTML
+// 导出单章为 Markdown / HTML / Word(docx)
 manuscriptsRouter.get("/:id/export", async (req: AuthedRequest, res) => {
   const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
   if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
   if (!role) return res.status(403).json({ error: "您不是该项目成员" });
+
+  if (req.query.format === "docx") {
+    const blocks = manuscript.docJson ? normalizeDoc(JSON.parse(manuscript.docJson))?.blocks ?? null : null;
+    const buf = await manuscriptToDocx(manuscript, blocks);
+    res.setHeader("Content-Type", DOCX_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(manuscript.title)}.docx`);
+    return res.send(buf);
+  }
   const format = req.query.format === "html" ? "html" : "md";
   const out = renderManuscript(manuscript, format);
   res.setHeader("Content-Type", contentType(format));

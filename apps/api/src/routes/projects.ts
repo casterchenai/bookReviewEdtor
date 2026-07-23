@@ -5,6 +5,7 @@ import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../mid
 import { AI_PROVIDERS, sanitizeAiConfig } from "../lib/ai-providers.js";
 import { parseHtml, parseMarkdown, normalizeDoc, blocksToHtml, blocksToMarkdown, textToMarkdown, type Block } from "../lib/content.js";
 import { parsePdf } from "../lib/pdf.js";
+import { bookToDocx } from "../lib/docx.js";
 import { extractReference } from "../lib/references.js";
 
 export const projectsRouter = Router();
@@ -154,7 +155,14 @@ projectsRouter.get("/:id/export", async (req: AuthedRequest, res) => {
     orderBy: { order: "asc" },
     select: { title: true, content: true, docJson: true, section: true },
   });
-  const format = req.query.format === "html" ? "html" : "md";
+  const format = req.query.format === "html" ? "html" : req.query.format === "docx" ? "docx" : "md";
+
+  if (format === "docx") {
+    const buf = await bookToDocx(project.title, chapters, (dj) => normalizeDoc(JSON.parse(dj))?.blocks ?? null);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(project.title)}.docx`);
+    return res.send(buf);
+  }
 
   if (format === "md") {
     const parts: string[] = [`# ${project.title}\n`];

@@ -246,6 +246,7 @@ export default function ProjectPage() {
                 <h2 style={{ flex: 1, margin: 0 }}>书稿章节（{project.manuscripts.length}）</h2>
                 {project.manuscripts.length > 0 && (
                   <>
+                    <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/projects/${id}/export?format=docx`).catch((e) => flash(e.message))}>导出整书 Word</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/projects/${id}/export?format=md`).catch((e) => flash(e.message))}>导出整书 MD</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/projects/${id}/export?format=html`).catch((e) => flash(e.message))}>导出整书 HTML</button>
                     {project.myRole !== "AI_ASSISTANT" && (

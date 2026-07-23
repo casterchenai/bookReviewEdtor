@@ -335,6 +335,7 @@ export default function ManuscriptPage() {
           <span className={`badge ${finalized ? "badge-ok" : "badge-warn"}`}>{STATUS_LABEL[ms.status]}</span>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(true)}>修订历史（{ms.revisions.length}）</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowSummary(true)}>审阅汇总</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=docx`).catch((e) => flash(e.message))}>导出 Word</button>
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=md`).catch((e) => flash(e.message))}>导出 MD</button>
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=html`).catch((e) => flash(e.message))}>导出 HTML</button>
           {isChief && (
