@@ -47,6 +47,9 @@ export default function ProjectPage() {
   const [newTitle, setNewTitle] = useState("");
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
+  const [bookSearch, setBookSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<{ id: string; title: string; section: string; count: number; snippet: string }[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRoleId, setInviteRoleId] = useState("");
@@ -108,6 +111,18 @@ export default function ProjectPage() {
       r.onerror = () => reject(new Error("读取文件失败"));
       r.readAsDataURL(file);
     });
+  }
+
+  async function runSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const q = bookSearch.trim();
+    if (!q) { setSearchResults(null); return; }
+    setSearching(true);
+    try {
+      const r = await api<{ results: typeof searchResults }>(`/projects/${id}/search?q=${encodeURIComponent(q)}`);
+      setSearchResults(r.results ?? []);
+    } catch (err) { flash(err instanceof Error ? err.message : "搜索失败"); }
+    finally { setSearching(false); }
   }
 
   async function renameChapter(mid: string) {
@@ -195,6 +210,31 @@ export default function ProjectPage() {
           </div>
           <span className="badge">我的角色：{project.members.find((m) => m.role === project.myRole && !m.user.isAI)?.bookRole?.name ?? ROLE_LABEL[project.myRole]}</span>
         </div>
+
+        {/* 全书搜索 */}
+        <form className="book-search" onSubmit={runSearch}>
+          <input className="input" placeholder="全书搜索关键词，快速定位到章节…" value={bookSearch}
+            onChange={(e) => setBookSearch(e.target.value)} />
+          <button className="btn btn-sm" disabled={searching}>{searching ? "搜索中…" : "搜索"}</button>
+          {searchResults !== null && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearchResults(null); setBookSearch(""); }}>清除</button>}
+        </form>
+        {searchResults !== null && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="muted small" style={{ marginBottom: 6 }}>
+              「{bookSearch}」命中 {searchResults.length} 个章节（共 {searchResults.reduce((s, r) => s + r.count, 0)} 处）
+            </div>
+            {searchResults.length === 0 ? <div className="empty small">未找到匹配</div> : searchResults.map((r) => (
+              <Link key={r.id} href={`/manuscripts/${r.id}?q=${encodeURIComponent(bookSearch)}`} style={{ textDecoration: "none", color: "inherit" }}>
+                <div className="revision-item" style={{ cursor: "pointer" }}>
+                  <div style={{ flex: 1 }}>
+                    <strong>{r.section ? r.section + " / " : ""}{r.title}</strong> <span className="badge badge-gray">{r.count} 处</span>
+                    <div className="muted small" style={{ marginTop: 2 }}>{r.snippet}</div>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
 
         <div className="grid" style={{ gridTemplateColumns: "minmax(0,1fr) 340px", alignItems: "start" }}>
           <div>

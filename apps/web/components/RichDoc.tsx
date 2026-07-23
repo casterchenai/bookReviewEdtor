@@ -33,9 +33,25 @@ const BLOCK_TAG: Record<string, string> = {
   heading: "标题", note: "注记", list: "列表", table: "表格", image: "图片", page: "页",
 };
 
+// 将文本中匹配 term 的部分用 <mark> 高亮（大小写不敏感）
+export function renderHighlight(text: string, term: string): React.ReactNode {
+  if (!term) return text;
+  const lower = text.toLowerCase(), t = term.toLowerCase();
+  const out: React.ReactNode[] = [];
+  let i = 0, k = 0;
+  while (i <= text.length) {
+    const p = lower.indexOf(t, i);
+    if (p < 0) { out.push(text.slice(i)); break; }
+    if (p > i) out.push(text.slice(i, p));
+    out.push(<mark key={k++} className="search-hit">{text.slice(p, p + term.length)}</mark>);
+    i = p + term.length;
+  }
+  return out;
+}
+
 // ===== 只读渲染（可点击选中以评论）=====
 export function RichDocView({
-  blocks, selectedIndex, onSelect, countByIndex, idPrefix, renderAfter,
+  blocks, selectedIndex, onSelect, countByIndex, idPrefix, renderAfter, highlight = "",
 }: {
   blocks: Block[];
   selectedIndex: number | null;
@@ -43,6 +59,7 @@ export function RichDocView({
   countByIndex: Map<number, number>;
   idPrefix?: string;
   renderAfter?: (i: number) => React.ReactNode;
+  highlight?: string;
 }) {
   return (
     <div className="manuscript-body rich">
@@ -56,7 +73,7 @@ export function RichDocView({
             onClick={() => onSelect(i)}
           >
             <span className="p-index">¶{i + 1}{b.type !== "para" && b.type !== "heading" ? ` ${BLOCK_TAG[b.type] ?? ""}` : ""}</span>
-            <BlockBody b={b} />
+            <BlockBody b={b} hl={highlight} />
           </div>
           {renderAfter?.(i)}
         </div>
@@ -65,23 +82,24 @@ export function RichDocView({
   );
 }
 
-function BlockBody({ b }: { b: Block }) {
+function BlockBody({ b, hl = "" }: { b: Block; hl?: string }) {
+  const H = (t: string) => hl ? renderHighlight(t, hl) : t;
   switch (b.type) {
     case "heading":
-      return b.level <= 1 ? <h2 className="rb-h1">{b.text}</h2> : b.level === 2 ? <h3 className="rb-h2">{b.text}</h3> : <h4 className="rb-h3">{b.text}</h4>;
-    case "para": return <p className="rb-p">{b.text}</p>;
-    case "note": return <div className="rb-note">{b.text}</div>;
+      return b.level <= 1 ? <h2 className="rb-h1">{H(b.text)}</h2> : b.level === 2 ? <h3 className="rb-h2">{H(b.text)}</h3> : <h4 className="rb-h3">{H(b.text)}</h4>;
+    case "para": return <p className="rb-p">{H(b.text)}</p>;
+    case "note": return <div className="rb-note">{H(b.text)}</div>;
     case "list":
       return b.ordered
-        ? <ol className="rb-list">{b.items.map((it, i) => <li key={i}>{it}</li>)}</ol>
-        : <ul className="rb-list">{b.items.map((it, i) => <li key={i}>{it}</li>)}</ul>;
+        ? <ol className="rb-list">{b.items.map((it, i) => <li key={i}>{H(it)}</li>)}</ol>
+        : <ul className="rb-list">{b.items.map((it, i) => <li key={i}>{H(it)}</li>)}</ul>;
     case "table":
       return (
         <div className="rb-table-wrap">
           <table className="rb-table">
             <tbody>
               {b.rows.map((r, ri) => (
-                <tr key={ri}>{r.cells.map((c, ci) => r.header ? <th key={ci}>{c}</th> : <td key={ci}>{c}</td>)}</tr>
+                <tr key={ri}>{r.cells.map((c, ci) => r.header ? <th key={ci}>{H(c)}</th> : <td key={ci}>{H(c)}</td>)}</tr>
               ))}
             </tbody>
           </table>

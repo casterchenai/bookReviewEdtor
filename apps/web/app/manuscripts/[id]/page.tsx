@@ -1,12 +1,13 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { diffChars } from "diff";
 import TopBar from "@/components/TopBar";
 import { api, downloadFile, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
-import { RichDocView, RichDocEditor, parseDoc, blockPreview, type Block } from "@/components/RichDoc";
+import { RichDocView, RichDocEditor, parseDoc, blockPreview, renderHighlight, type Block } from "@/components/RichDoc";
 import CommentMargin from "@/components/CommentMargin";
+import CommentMinimap from "@/components/CommentMinimap";
 
 type Comment = {
   id: string; paragraphIndex: number; quote: string; body: string;
@@ -25,8 +26,11 @@ type ManuscriptDetail = {
 
 export default function ManuscriptPage() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const [ms, setMs] = useState<ManuscriptDetail | null>(null);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [matchIdx, setMatchIdx] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [draftBlocks, setDraftBlocks] = useState<Block[]>([]);
@@ -67,6 +71,7 @@ export default function ManuscriptPage() {
     const pid = ms?.project.id;
     if (pid) api<{ id: string; name: string; enabled: boolean }[]>(`/projects/${pid}/agents`).then(setAgents).catch(() => {});
   }, [ms?.project.id]);
+  useEffect(() => { const q = searchParams.get("q"); if (q) setSearch(q); }, [searchParams]);
 
   function flash(msg: string) { setToast(msg); setTimeout(() => setToast(""), 3000); }
 
@@ -76,7 +81,17 @@ export default function ManuscriptPage() {
   const docBlocks = parseDoc(ms.docJson);
   const isRich = docBlocks !== null;
   const paragraphs = ms.content.split(/\n\n/);
+  const unitCount = isRich ? docBlocks.length : paragraphs.length;
   const unitText = (i: number) => isRich ? (docBlocks[i] ? blockPreview(docBlocks[i]) : "") : (paragraphs[i] ?? "");
+  const matchUnits = search.trim()
+    ? Array.from({ length: unitCount }, (_, i) => i).filter((i) => unitText(i).toLowerCase().includes(search.trim().toLowerCase()))
+    : [];
+  function gotoMatch(target: number) {
+    if (matchUnits.length === 0) return;
+    const n = ((target % matchUnits.length) + matchUnits.length) % matchUnits.length;
+    setMatchIdx(n);
+    document.getElementById(`u-${matchUnits[n]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
   const isChief = ms.myRole === "CHIEF_EDITOR";
   const canReview = ms.myRole !== "AI_ASSISTANT";
   const finalized = ms.status === "FINALIZED";
@@ -331,6 +346,19 @@ export default function ManuscriptPage() {
         <div className="review-workspace">
           {/* 左：书稿正文 */}
           <div className="card doc-col" ref={docRef}>
+            <div className="chapter-search">
+              <input className="input" placeholder="在本章内搜索关键词…" value={search}
+                onChange={(e) => { setSearch(e.target.value); setMatchIdx(0); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); gotoMatch(e.shiftKey ? matchIdx - 1 : matchIdx + (matchUnits.length && matchIdx === 0 ? 0 : 1)); } }} />
+              {search.trim() && (
+                <span className="cs-nav">
+                  <span className="muted small">{matchUnits.length ? `${matchIdx + 1}/${matchUnits.length}` : "无匹配"}</span>
+                  <button className="btn btn-ghost btn-sm" disabled={!matchUnits.length} onClick={() => gotoMatch(matchIdx - 1)}>↑</button>
+                  <button className="btn btn-ghost btn-sm" disabled={!matchUnits.length} onClick={() => gotoMatch(matchIdx + 1)}>↓</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setSearch("")}>清除</button>
+                </span>
+              )}
+            </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
               <h2 style={{ flex: 1, margin: 0 }}>书稿正文</h2>
               {!editing && !finalized && canReview && (
@@ -372,6 +400,7 @@ export default function ManuscriptPage() {
                   blocks={docBlocks} selectedIndex={selectedPara}
                   onSelect={(i) => setSelectedPara(selectedPara === i ? null : i)}
                   countByIndex={countByPara} idPrefix="u-" renderAfter={composer}
+                  highlight={search.trim()}
                 />
               )
             ) : (
@@ -385,7 +414,7 @@ export default function ManuscriptPage() {
                         className={`paragraph ${selectedPara === i ? "selected" : ""} ${countByPara.has(i) ? "has-comments" : ""}`}
                         data-count={countByPara.get(i) ?? ""} title="点击此段落发表审阅意见"
                         onClick={() => setSelectedPara(selectedPara === i ? null : i)}>
-                        <span className="p-index">¶{i + 1}</span>{p}
+                        <span className="p-index">¶{i + 1}</span>{search.trim() ? renderHighlight(p, search.trim()) : p}
                       </p>
                       {composer(i)}
                     </div>
@@ -408,6 +437,11 @@ export default function ManuscriptPage() {
             </div>
           )}
         </div>
+
+        {/* 右侧迷你滑块：快速定位到各条审校意见 */}
+        {!editing && ms.comments.length > 0 && (
+          <CommentMinimap comments={ms.comments} idPrefix="u-" />
+        )}
 
         {/* 对比弹层 */}
         {diffView && (

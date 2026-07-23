@@ -267,6 +267,28 @@ button { font-family: inherit; }
 .de-tag { flex: 1; font-size: 0.78rem; color: var(--ink-soft); }
 .de-preview { font-size: 0.85rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* 审校意见迷你滑块 */
+.cmt-minimap { position: fixed; right: 0; top: 0; height: 100vh; width: 20px; z-index: 40; pointer-events: none; }
+.mm-tick { position: absolute; right: 3px; width: 11px; height: 2px; border-radius: 2px; background: var(--accent); opacity: 0.7; cursor: pointer; pointer-events: auto; transition: height 0.1s, width 0.1s, opacity 0.1s; }
+.mm-tick.done { background: var(--ink-soft); opacity: 0.4; }
+.mm-tick.ai { background: var(--primary); }
+.mm-tick:hover, .mm-tick.hot { height: 5px; width: 18px; opacity: 1; }
+.mm-tip {
+  position: absolute; right: 22px; top: -10px; white-space: normal; width: 260px;
+  background: var(--ink); color: #fff; font-size: 0.74rem; line-height: 1.35; padding: 6px 10px;
+  border-radius: 6px; box-shadow: var(--shadow); pointer-events: none;
+}
+.mm-tip-meta { color: #cbd5e1; font-size: 0.68rem; }
+
+/* 全文搜索 */
+.book-search { display: flex; gap: 8px; margin-bottom: 14px; }
+.book-search .input { flex: 1; }
+.chapter-search { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.chapter-search .input { flex: 1; height: 34px; }
+.cs-nav { display: flex; align-items: center; gap: 4px; flex: none; }
+mark.search-hit { background: #ffe14d; color: inherit; padding: 0 1px; border-radius: 2px; }
+:root[data-theme="dark"] mark.search-hit { background: #8a7200; color: #fff; }
+
 /* 审校进度概览 */
 .progress-box { margin: 10px 0 4px; }
 .progress-stats { display: flex; gap: 16px; font-size: 0.82rem; color: var(--ink-soft); margin-bottom: 6px; }

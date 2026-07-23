@@ -117,6 +117,32 @@ projectsRouter.get("/:id", async (req: AuthedRequest, res) => {
   res.json({ ...project, myRole: role, hasBookAiConfig: Boolean(project.aiConfig) });
 });
 
+// 全文搜索：在本书所有章节的正文中查找关键词，返回命中的章节与片段
+projectsRouter.get("/:id/search", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (!role) return res.status(403).json({ error: "您不是该项目成员" });
+  const q = String(req.query.q ?? "").trim();
+  if (!q) return res.json({ query: "", results: [] });
+
+  const chapters = await prisma.manuscript.findMany({
+    where: { projectId: req.params.id }, orderBy: { order: "asc" },
+    select: { id: true, title: true, section: true, content: true },
+  });
+  const needle = q.toLowerCase();
+  const results = [];
+  for (const c of chapters) {
+    const hay = c.content.toLowerCase();
+    const idx = hay.indexOf(needle);
+    if (idx < 0) continue;
+    let count = 0, from = 0;
+    while (true) { const p = hay.indexOf(needle, from); if (p < 0) break; count++; from = p + needle.length; }
+    const start = Math.max(0, idx - 24);
+    const snippet = (start > 0 ? "…" : "") + c.content.slice(start, idx + q.length + 36).replace(/\n+/g, " ") + "…";
+    results.push({ id: c.id, title: c.title, section: c.section, count, snippet });
+  }
+  res.json({ query: q, results });
+});
+
 // 导出整本书为 Markdown / HTML（合并所有章节，按部分分组）
 projectsRouter.get("/:id/export", async (req: AuthedRequest, res) => {
   const role = await memberRole(req.params.id, req.userId!);
