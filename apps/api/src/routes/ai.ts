@@ -187,30 +187,37 @@ aiRouter.post("/manuscripts/:id/review", async (req: AuthedRequest, res) => {
     engine = "stub";
   }
 
+  // 跳过已有同来源（同智能体 / 默认 AI）未处理意见的段落，避免重复审校
+  const already = await prisma.comment.findMany({
+    where: { manuscriptId: manuscript.id, authorId: aiUser.id, status: "OPEN", aiAgentName: agent?.name ?? null },
+    select: { paragraphIndex: true },
+  });
+  const skipSet = new Set(already.map((c) => c.paragraphIndex));
+  const toCreate = suggestions.filter((s) => s.paragraphIndex >= 0 && s.paragraphIndex < paragraphs.length && !skipSet.has(s.paragraphIndex));
+  const skipped = suggestions.length - toCreate.length;
+
   const created = await prisma.$transaction(
-    suggestions
-      .filter((s) => s.paragraphIndex >= 0 && s.paragraphIndex < paragraphs.length)
-      .map((s) =>
-        prisma.comment.create({
-          data: {
-            manuscriptId: manuscript.id,
-            authorId: aiUser.id,
-            authorRole: "AI_ASSISTANT",
-            paragraphIndex: s.paragraphIndex,
-            quote: s.quote.slice(0, 200),
-            body: s.issue,
-            category: agent ? agent.category : s.category,
-            suggestedText: s.suggestedParagraph,
-            aiAgentName: agent?.name ?? null,
-          },
-          include: { author: { select: { name: true, isAI: true } } },
-        }),
-      ),
+    toCreate.map((s) =>
+      prisma.comment.create({
+        data: {
+          manuscriptId: manuscript.id,
+          authorId: aiUser.id,
+          authorRole: "AI_ASSISTANT",
+          paragraphIndex: s.paragraphIndex,
+          quote: s.quote.slice(0, 200),
+          body: s.issue,
+          category: agent ? agent.category : s.category,
+          suggestedText: s.suggestedParagraph,
+          aiAgentName: agent?.name ?? null,
+        },
+        include: { author: { select: { name: true, isAI: true } } },
+      }),
+    ),
   );
 
   const me = await prisma.user.findUnique({ where: { id: req.userId! } });
-  await logActivity(manuscript.projectId, me!.name, "发起 AI 审校", `${agent ? agent.name + " · " : ""}${engine} · 生成 ${created.length} 条建议`);
-  res.json({ engine, agent: agent?.name ?? null, count: created.length, comments: created });
+  await logActivity(manuscript.projectId, me!.name, "发起 AI 审校", `${agent ? agent.name + " · " : ""}${engine} · 生成 ${created.length} 条${skipped ? `（跳过 ${skipped} 段已审校）` : ""}`);
+  res.json({ engine, agent: agent?.name ?? null, count: created.length, skipped, comments: created });
 });
 
 // AI 读稿，为本书推荐量身定制的审校智能体（不落库，返回候选供主编采纳）

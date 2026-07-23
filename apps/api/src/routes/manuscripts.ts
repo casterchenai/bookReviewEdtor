@@ -203,6 +203,20 @@ manuscriptsRouter.post("/:id/finalize", async (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
+// 清除本章所有 AI 审校意见（便于清理后重新审校）
+manuscriptsRouter.delete("/:id/ai-comments", async (req: AuthedRequest, res) => {
+  const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
+  if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
+  if (!role || role === "AI_ASSISTANT") return res.status(403).json({ error: "无权限" });
+
+  const del = await prisma.comment.deleteMany({
+    where: { manuscriptId: manuscript.id, author: { isAI: true } },
+  });
+  const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+  await logActivity(manuscript.projectId, me!.name, "清除 AI 审校意见", `《${manuscript.title}》${del.count} 条`);
+  res.json({ ok: true, count: del.count });
+});
+
 // 全部采纳：一次性采纳所有含建议的待处理意见，合并生成一个新版本
 manuscriptsRouter.post("/:id/accept-all", async (req: AuthedRequest, res) => {
   const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);

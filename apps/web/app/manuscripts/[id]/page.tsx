@@ -193,20 +193,29 @@ export default function ManuscriptPage() {
       if (reviewAgent === "ALL") {
         const enabled = agents.filter((a) => a.enabled);
         if (enabled.length === 0) { flash("没有启用的智能体"); return; }
-        let total = 0;
+        let total = 0, skip = 0;
         for (let k = 0; k < enabled.length; k++) {
           flash(`智能体审校中 ${k + 1}/${enabled.length}：${enabled[k].name}…`);
-          try { const r = await api<{ count: number }>(`/ai/manuscripts/${id}/review`, { method: "POST", body: { agentId: enabled[k].id } }); total += r.count; } catch { /* 单个失败继续 */ }
+          try { const r = await api<{ count: number; skipped: number }>(`/ai/manuscripts/${id}/review`, { method: "POST", body: { agentId: enabled[k].id } }); total += r.count; skip += r.skipped ?? 0; } catch { /* 单个失败继续 */ }
         }
-        load(); flash(`全部智能体审校完成，共生成 ${total} 条建议`);
+        load(); flash(`全部智能体审校完成，共生成 ${total} 条${skip ? `（跳过 ${skip} 段已审校）` : ""}`);
       } else {
         const body = reviewAgent ? { agentId: reviewAgent } : {};
-        const r = await api<{ engine: string; count: number; agent: string | null }>(`/ai/manuscripts/${id}/review`, { method: "POST", body });
+        const r = await api<{ engine: string; count: number; skipped: number; agent: string | null }>(`/ai/manuscripts/${id}/review`, { method: "POST", body });
         load();
-        flash(r.engine === "stub" ? `演示模式：生成 ${r.count} 条示例建议（配置 AI 密钥后启用真实审校）` : `${r.agent ? r.agent + " " : "AI "}审校完成，生成 ${r.count} 条建议`);
+        flash(r.engine === "stub" ? `演示模式：生成 ${r.count} 条示例建议（配置 AI 密钥后启用真实审校）` : `${r.agent ? r.agent + " " : "AI "}审校完成，生成 ${r.count} 条${r.skipped ? `（跳过 ${r.skipped} 段已审校）` : ""}`);
       }
     } catch (err) { flash(err instanceof Error ? err.message : "AI 审校失败"); }
     finally { setAiBusy(false); }
+  }
+
+  async function clearAiComments() {
+    const aiCount = ms!.comments.filter((c) => c.author.isAI).length;
+    if (!confirm(`确认清除本章全部 ${aiCount} 条 AI 审校意见？（不影响人工意见与版本历史，便于重新审校）`)) return;
+    try {
+      const r = await api<{ count: number }>(`/manuscripts/${id}/ai-comments`, { method: "DELETE" });
+      load(); flash(`已清除 ${r.count} 条 AI 审校意见`);
+    } catch (err) { flash(err instanceof Error ? err.message : "清除失败"); }
   }
 
   async function fetchRev(number: number): Promise<string> {
@@ -335,6 +344,9 @@ export default function ManuscriptPage() {
                 </select>
               )}
               <button className="btn btn-sm" onClick={runAI} disabled={aiBusy || editing}>{aiBusy ? "AI 审校中…" : "🤖 AI 智能审校"}</button>
+              {ms.comments.some((c) => c.author.isAI) && (
+                <button className="btn btn-ghost btn-sm" onClick={clearAiComments} disabled={aiBusy || editing} title="清除本章全部 AI 审校意见">清除 AI 意见</button>
+              )}
               {isChief && !finalized && openComments.some((c) => c.suggestedText) && (
                 <button className="btn btn-sm" onClick={() => setAcceptAllOpen(true)} disabled={editing}>
                   ✓ 全部采纳（{openComments.filter((c) => c.suggestedText).length}）
