@@ -44,6 +44,8 @@ export default function ProjectPage() {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState("");
   const [newTitle, setNewTitle] = useState("");
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRoleId, setInviteRoleId] = useState("");
@@ -105,6 +107,14 @@ export default function ProjectPage() {
       r.onerror = () => reject(new Error("读取文件失败"));
       r.readAsDataURL(file);
     });
+  }
+
+  async function renameChapter(mid: string) {
+    if (!renameVal.trim()) { flash("标题不能为空"); return; }
+    try {
+      await api(`/manuscripts/${mid}/title`, { method: "PATCH", body: { title: renameVal.trim() } });
+      setRenameId(null); load(); flash("章节已改名");
+    } catch (err) { flash(err instanceof Error ? err.message : "改名失败"); }
   }
 
   async function createChapter(e: React.FormEvent) {
@@ -223,20 +233,30 @@ export default function ProjectPage() {
               {groupBySection(project.manuscripts).map(([section, items]) => (
                 <div key={section}>
                   {section && <div className="section-head">{section}</div>}
-                  {items.map((m) => (
-                    <Link key={m.id} href={`/manuscripts/${m.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                      <div className="revision-item" style={{ cursor: "pointer", alignItems: "center" }}>
-                        <div style={{ flex: 1 }}>
+                  {items.map((m) => renameId === m.id ? (
+                    <div key={m.id} className="revision-item" style={{ alignItems: "center", gap: 8 }}>
+                      <input className="input" style={{ flex: 1 }} value={renameVal} autoFocus onChange={(e) => setRenameVal(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") renameChapter(m.id); if (e.key === "Escape") setRenameId(null); }} />
+                      <button className="btn btn-sm" onClick={() => renameChapter(m.id)}>保存</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setRenameId(null)}>取消</button>
+                    </div>
+                  ) : (
+                    <div key={m.id} className="revision-item" style={{ alignItems: "center" }}>
+                      <Link href={`/manuscripts/${m.id}`} style={{ textDecoration: "none", color: "inherit", flex: 1 }}>
+                        <div style={{ cursor: "pointer" }}>
                           <strong>{m.title}</strong>
                           <div className="muted small">
                             修订 {m._count.revisions} 次 · 待处理意见 {m._count.comments} 条 · 更新于 {new Date(m.updatedAt).toLocaleString("zh-CN")}
                           </div>
                         </div>
-                        <span className={`badge ${m.status === "FINALIZED" ? "badge-ok" : m.status === "IN_REVIEW" ? "badge-warn" : "badge-gray"}`}>
-                          {STATUS_LABEL[m.status]}
-                        </span>
-                      </div>
-                    </Link>
+                      </Link>
+                      {isChief && m.status !== "FINALIZED" && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => { setRenameId(m.id); setRenameVal(m.title); }}>改名</button>
+                      )}
+                      <span className={`badge ${m.status === "FINALIZED" ? "badge-ok" : m.status === "IN_REVIEW" ? "badge-warn" : "badge-gray"}`}>
+                        {STATUS_LABEL[m.status]}
+                      </span>
+                    </div>
                   ))}
                 </div>
               ))}

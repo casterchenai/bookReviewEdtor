@@ -42,6 +42,8 @@ export default function ManuscriptPage() {
   const [suggestBusy, setSuggestBusy] = useState(false);
   const [acceptAllOpen, setAcceptAllOpen] = useState(false);
   const [acceptAllSummary, setAcceptAllSummary] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [agents, setAgents] = useState<{ id: string; name: string; enabled: boolean }[]>([]);
   const [reviewAgent, setReviewAgent] = useState<string>(""); // "" 默认 · "ALL" 全部启用 · agentId
@@ -150,6 +152,14 @@ export default function ManuscriptPage() {
       }
       flash(`同类问题检查完成：其他章节共新增 ${total} 条意见`);
     } catch { flash("跨章节检查未完成"); }
+  }
+
+  async function saveTitle() {
+    if (!titleDraft.trim()) { flash("标题不能为空"); return; }
+    try {
+      await api(`/manuscripts/${id}/title`, { method: "PATCH", body: { title: titleDraft.trim() } });
+      setEditingTitle(false); load(); flash("标题已更新");
+    } catch (err) { flash(err instanceof Error ? err.message : "改名失败"); }
   }
 
   async function acceptAll() {
@@ -281,7 +291,20 @@ export default function ManuscriptPage() {
             <div className="muted small">
               <Link href="/dashboard">项目列表</Link> / <Link href={`/projects/${ms.project.id}`}>{ms.project.title}</Link> / 书稿
             </div>
-            <h1>{ms.title}</h1>
+            {editingTitle ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+                <input className="input" style={{ fontSize: "1.2rem", fontWeight: 700, maxWidth: 520 }} value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} autoFocus />
+                <button className="btn btn-sm" onClick={saveTitle}>保存</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setEditingTitle(false)}>取消</button>
+              </div>
+            ) : (
+              <h1 style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                {ms.title}
+                {isChief && !finalized && (
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setTitleDraft(ms.title); setEditingTitle(true); }}>改名</button>
+                )}
+              </h1>
+            )}
           </div>
           <span className={`badge ${finalized ? "badge-ok" : "badge-warn"}`}>{STATUS_LABEL[ms.status]}</span>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(true)}>修订历史（{ms.revisions.length}）</button>
