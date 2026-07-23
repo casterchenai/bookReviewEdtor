@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import AiConfigForm from "@/components/AiConfigForm";
 import AgentManager from "@/components/AgentManager";
+import { useConfirm } from "@/components/ConfirmProvider";
 import ReferenceLibrary from "@/components/ReferenceLibrary";
 import { api, downloadFile, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
 
@@ -42,6 +43,7 @@ const BASE_OPTIONS = [
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
+  const confirm = useConfirm();
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState("");
   const [newTitle, setNewTitle] = useState("");
@@ -86,7 +88,7 @@ export default function ProjectPage() {
     if (!project) return;
     const targets = project.manuscripts.filter((m) => m.status !== "FINALIZED");
     if (targets.length === 0) { flash("没有可审校的书稿"); return; }
-    if (!confirm(`将对 ${targets.length} 篇未定稿书稿依次运行 AI 智能审校，可能需要几分钟。继续？`)) return;
+    if (!(await confirm({ title: "批量 AI 审校", body: `将对 ${targets.length} 篇未定稿书稿依次运行 AI 智能审校，可能需要几分钟。继续？`, confirmText: "开始" }))) return;
     setBatch({ done: 0, total: targets.length });
     let ok = 0;
     for (let i = 0; i < targets.length; i++) {
@@ -168,7 +170,7 @@ export default function ProjectPage() {
   }
 
   async function removeMember(memberId: string, name: string) {
-    if (!confirm(`确认将「${name}」移出本项目？`)) return;
+    if (!(await confirm({ title: "移除成员", body: `确认将「${name}」移出本项目？`, confirmText: "移除", danger: true }))) return;
     try {
       await api(`/projects/${id}/members/${memberId}`, { method: "DELETE" });
       load(); flash("成员已移除");
@@ -191,7 +193,7 @@ export default function ProjectPage() {
   }
 
   async function deleteRole(roleId: string) {
-    if (!confirm("确认删除该角色？")) return;
+    if (!(await confirm({ title: "删除角色", body: "确认删除该角色？", confirmText: "删除", danger: true }))) return;
     try {
       await api(`/projects/${id}/roles/${roleId}`, { method: "DELETE" });
       load(); flash("角色已删除");

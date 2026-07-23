@@ -1,6 +1,7 @@
 "use client";
 // 结构化块的渲染与编辑：标题 / 正文 / 注记 / 列表 / 表格 / 图片 / PDF 页
 import { useState } from "react";
+import { useConfirm } from "@/components/ConfirmProvider";
 
 export type Block =
   | { type: "heading"; level: number; text: string }
@@ -116,13 +117,14 @@ function BlockBody({ b, hl = "" }: { b: Block; hl?: string }) {
 
 // ===== 块编辑器（受控）=====
 export function RichDocEditor({ blocks, onChange }: { blocks: Block[]; onChange: (b: Block[]) => void }) {
+  const confirm = useConfirm();
   const [open, setOpen] = useState<number | null>(null);
 
   function update(i: number, nb: Block) {
     const next = blocks.slice(); next[i] = nb; onChange(next);
   }
-  function remove(i: number) {
-    if (!confirm("删除此内容块？")) return;
+  async function remove(i: number) {
+    if (!(await confirm({ title: "删除内容块", body: "删除此内容块？", confirmText: "删除", danger: true }))) return;
     onChange(blocks.filter((_, x) => x !== i));
   }
 

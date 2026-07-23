@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import AiConfigForm from "@/components/AiConfigForm";
 import { api, getUser } from "@/lib/api";
+import { useConfirm } from "@/components/ConfirmProvider";
 
 type AdminUser = {
   id: string; email: string; name: string; isSuperAdmin: boolean; canCreateBooks: boolean;
@@ -19,6 +20,7 @@ const ROLE_LABELS: Record<string, string> = { super: "超级管理员", creator:
 
 export default function AdminPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [projects, setProjects] = useState<AdminProject[] | null>(null);
   const [toast, setToast] = useState("");
@@ -83,7 +85,7 @@ export default function AdminPage() {
   }
 
   async function removeUser(u: AdminUser) {
-    if (!confirm(`确认删除用户「${u.name}」？该用户在所有项目中的成员身份将一并移除，不可撤销。`)) return;
+    if (!(await confirm({ title: "删除用户", body: `确认删除用户「${u.name}」？该用户在所有项目中的成员身份将一并移除，不可撤销。`, confirmText: "删除", danger: true }))) return;
     try { await api(`/admin/users/${u.id}`, { method: "DELETE" }); load(); flash("用户已删除"); }
     catch (err) { flash(err instanceof Error ? err.message : "删除失败"); }
   }
@@ -97,7 +99,7 @@ export default function AdminPage() {
   }
 
   async function deleteBook(p: AdminProject) {
-    if (!confirm(`确认删除书籍「${p.title}」？其全部 ${p._count.manuscripts} 篇书稿、成员、意见与修订历史将一并永久删除，不可撤销。`)) return;
+    if (!(await confirm({ title: "删除书籍", body: `确认删除书籍「${p.title}」？其全部 ${p._count.manuscripts} 篇书稿、成员、意见与修订历史将一并永久删除，不可撤销。`, confirmText: "删除", danger: true }))) return;
     try { await api(`/admin/projects/${p.id}`, { method: "DELETE" }); load(); flash("书籍已删除"); }
     catch (err) { flash(err instanceof Error ? err.message : "删除失败"); }
   }

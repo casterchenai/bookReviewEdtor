@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import ConfirmProvider from "@/components/ConfirmProvider";
 
 export const metadata: Metadata = {
   title: "BookReviewEditor · 图书出版前协同审校平台",
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body><ConfirmProvider>{children}</ConfirmProvider></body>
     </html>
   );
 }

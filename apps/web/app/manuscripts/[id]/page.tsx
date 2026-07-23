@@ -8,6 +8,7 @@ import { api, downloadFile, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/l
 import { RichDocView, RichDocEditor, parseDoc, blockPreview, renderHighlight, type Block } from "@/components/RichDoc";
 import CommentMargin from "@/components/CommentMargin";
 import CommentMinimap from "@/components/CommentMinimap";
+import { useConfirm } from "@/components/ConfirmProvider";
 
 type Comment = {
   id: string; paragraphIndex: number; quote: string; body: string;
@@ -27,6 +28,7 @@ type ManuscriptDetail = {
 export default function ManuscriptPage() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
+  const confirm = useConfirm();
   const [ms, setMs] = useState<ManuscriptDetail | null>(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -48,7 +50,6 @@ export default function ManuscriptPage() {
   const [acceptAllSummary, setAcceptAllSummary] = useState("");
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [clearOpen, setClearOpen] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [agents, setAgents] = useState<{ id: string; name: string; enabled: boolean }[]>([]);
   const [reviewAgent, setReviewAgent] = useState<string>(""); // "" 默认 · "ALL" 全部启用 · agentId
@@ -226,7 +227,8 @@ export default function ManuscriptPage() {
   }
 
   async function clearAiComments() {
-    setClearOpen(false);
+    const aiCount = ms!.comments.filter((c) => c.author.isAI).length;
+    if (!(await confirm({ title: "清除 AI 审校意见", body: `将清除本章全部 ${aiCount} 条 AI 审校意见（不影响人工意见与版本历史），便于重新审校。此操作不可撤销。`, confirmText: "清除", danger: true }))) return;
     try {
       const r = await api<{ count: number }>(`/manuscripts/${id}/ai-comments`, { method: "DELETE" });
       load(); flash(`已清除 ${r.count} 条 AI 审校意见`);
@@ -257,7 +259,7 @@ export default function ManuscriptPage() {
   }
 
   async function rollback(number: number) {
-    if (!confirm(`确认回退到第 ${number} 版？将据此生成一个新版本，历史不会丢失（git 式提交）。`)) return;
+    if (!(await confirm({ title: "回退版本", body: `确认回退到第 ${number} 版？将据此生成一个新版本，历史不会丢失（git 式提交）。`, confirmText: "回退" }))) return;
     try {
       await api(`/manuscripts/${id}/rollback`, { method: "POST", body: { number } });
       revCache.current.clear(); setShowHistory(false); load(); flash("已回退并生成新版本");
@@ -373,7 +375,7 @@ export default function ManuscriptPage() {
               )}
               <button className="btn btn-sm" onClick={runAI} disabled={aiBusy || editing}>{aiBusy ? "AI 审校中…" : "🤖 AI 智能审校"}</button>
               {ms.comments.some((c) => c.author.isAI) && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setClearOpen(true)} disabled={aiBusy || editing} title="清除本章全部 AI 审校意见">清除 AI 意见</button>
+                <button className="btn btn-ghost btn-sm" onClick={clearAiComments} disabled={aiBusy || editing} title="清除本章全部 AI 审校意见">清除 AI 意见</button>
               )}
               {isChief && !finalized && openComments.some((c) => c.suggestedText) && (
                 <button className="btn btn-sm" onClick={() => setAcceptAllOpen(true)} disabled={editing}>
@@ -500,22 +502,6 @@ export default function ManuscriptPage() {
                     </div>
                   </div>
                 ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 清除 AI 意见确认（应用内弹窗，避免浏览器拦截） */}
-        {clearOpen && (
-          <div className="modal-overlay" onClick={() => setClearOpen(false)}>
-            <div className="card modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-              <h2 style={{ marginTop: 0 }}>清除 AI 审校意见</h2>
-              <p className="muted small">
-                将清除本章全部 {ms.comments.filter((c) => c.author.isAI).length} 条 AI 审校意见（不影响人工意见与版本历史），便于重新审校。此操作不可撤销。
-              </p>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-danger" onClick={clearAiComments}>确认清除</button>
-                <button className="btn btn-ghost" onClick={() => setClearOpen(false)}>取消</button>
               </div>
             </div>
           </div>

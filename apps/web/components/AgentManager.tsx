@@ -2,6 +2,7 @@
 // 每本书的 AI 审校智能体管理：增删改 + AI 读稿推荐一键采纳
 import { useCallback, useEffect, useState } from "react";
 import { api, CATEGORY_LABEL } from "@/lib/api";
+import { useConfirm } from "@/components/ConfirmProvider";
 
 export type Agent = {
   id: string; name: string; role: string; systemPrompt: string;
@@ -12,6 +13,7 @@ type Suggested = { name: string; role: string; systemPrompt: string; category: s
 const CATS = ["GENERAL", "GRAMMAR", "WORDING", "LOGIC", "STYLE", "MARKET", "STANDARD"];
 
 export default function AgentManager({ projectId, onFlash }: { projectId: string; onFlash: (m: string) => void }) {
+  const confirm = useConfirm();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<Agent> | null>(null);
@@ -39,7 +41,7 @@ export default function AgentManager({ projectId, onFlash }: { projectId: string
     catch (err) { onFlash(err instanceof Error ? err.message : "操作失败"); }
   }
   async function remove(a: Agent) {
-    if (!confirm(`删除智能体「${a.name}」？`)) return;
+    if (!(await confirm({ title: "删除智能体", body: `删除智能体「${a.name}」？`, confirmText: "删除", danger: true }))) return;
     try { await api(`/projects/${projectId}/agents/${a.id}`, { method: "DELETE" }); load(); onFlash("已删除"); }
     catch (err) { onFlash(err instanceof Error ? err.message : "删除失败"); }
   }

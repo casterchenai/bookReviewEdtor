@@ -2,6 +2,7 @@
 // 每本书的参考文献 / 资料：上传多份（WPS/Office/PDF/图片）、列表、下载、删除
 import { useCallback, useEffect, useState } from "react";
 import { api, downloadFile } from "@/lib/api";
+import { useConfirm } from "@/components/ConfirmProvider";
 
 type Ref = {
   id: string; name: string; kind: string; size: number; createdAt: string;
@@ -21,6 +22,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export default function ReferenceLibrary({ projectId, onFlash }: { projectId: string; onFlash: (m: string) => void }) {
+  const confirm = useConfirm();
   const [open, setOpen] = useState(false);
   const [refs, setRefs] = useState<Ref[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,7 +51,7 @@ export default function ReferenceLibrary({ projectId, onFlash }: { projectId: st
   }
 
   async function remove(r: Ref) {
-    if (!confirm(`删除参考文献「${r.name}」？`)) return;
+    if (!(await confirm({ title: "删除参考文献", body: `删除参考文献「${r.name}」？`, confirmText: "删除", danger: true }))) return;
     try { await api(`/projects/${projectId}/references/${r.id}`, { method: "DELETE" }); load(); onFlash("已删除"); }
     catch (err) { onFlash(err instanceof Error ? err.message : "删除失败"); }
   }
