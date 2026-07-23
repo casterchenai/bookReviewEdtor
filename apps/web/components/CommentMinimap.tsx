@@ -1,8 +1,10 @@
 "use client";
 // 右侧迷你滑块：每条审校意见一个小横杠，按其锚定段落在全文中的位置排布。
 // 悬停变粗并显示提示，点击把窗口滚动锚定到对应段落。
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { CATEGORY_LABEL, ROLE_LABEL } from "@/lib/api";
+
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 type C = {
   id: string; paragraphIndex: number; body: string; category: string; status: string;
@@ -13,8 +15,7 @@ export default function CommentMinimap({ comments, idPrefix }: { comments: C[]; 
   const [ticks, setTicks] = useState<{ c: C; top: number }[]>([]);
   const [hover, setHover] = useState<string | null>(null);
 
-  useEffect(() => {
-    let raf = 0;
+  useIsoLayoutEffect(() => {
     function measure() {
       const docH = document.documentElement.scrollHeight || 1;
       const stripH = window.innerHeight;
@@ -25,13 +26,13 @@ export default function CommentMinimap({ comments, idPrefix }: { comments: C[]; 
         const anchorTop = el.getBoundingClientRect().top + window.scrollY;
         next.push({ c, top: Math.min(stripH - 4, Math.max(2, (anchorTop / docH) * stripH)) });
       }
-      setTicks(next);
+      setTicks((prev) => (prev.length === next.length && prev.every((p, i) => Math.abs(p.top - next[i].top) < 0.5) ? prev : next));
     }
-    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
-    schedule();
-    const t = setTimeout(schedule, 400); // 等富内容/批注布局稳定
-    window.addEventListener("resize", schedule);
-    return () => { window.removeEventListener("resize", schedule); clearTimeout(t); cancelAnimationFrame(raf); };
+    measure(); // 同步测量：此时正文锚点已在 DOM 中
+    const timers = [setTimeout(measure, 150), setTimeout(measure, 600), setTimeout(measure, 1400)]; // 等图片/富内容布局稳定
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, { passive: true });
+    return () => { timers.forEach(clearTimeout); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure); };
   }, [comments, idPrefix]);
 
   if (ticks.length === 0) return null;
