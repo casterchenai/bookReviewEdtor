@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import AiConfigForm from "@/components/AiConfigForm";
+import AgentManager from "@/components/AgentManager";
 import { api, downloadFile, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
 
 type BookRole = { id: string; name: string; base: string; order?: number; isDefault?: boolean; _count?: { members: number } };
@@ -400,6 +401,9 @@ export default function ProjectPage() {
                 {showAi && <div style={{ marginTop: 10 }}><AiConfigForm endpoint={`/projects/${id}/ai-config`} scope="book" onFlash={flash} /></div>}
               </div>
             )}
+
+            {/* 本书 AI 审校智能体 */}
+            {isChief && <AgentManager projectId={id} onFlash={flash} />}
           </div>
         </div>
       </main>

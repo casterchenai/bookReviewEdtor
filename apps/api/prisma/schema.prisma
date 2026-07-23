@@ -58,6 +58,23 @@ model BookRole {
   @@unique([projectId, name])
 }
 
+// 每本书的 AI 审校智能体（不同书可有不同智能体：名称 + 角色 + 技能提示词）
+model AiAgent {
+  id           String          @id @default(cuid())
+  projectId    String
+  name         String          // 智能体名称，如「会计准则合规审查」
+  role         String          @default("") // 一句话角色定位
+  systemPrompt String          // 该智能体的审校指令（“技能”）
+  category     CommentCategory @default(GENERAL) // 意见默认归类
+  enabled      Boolean         @default(true)
+  order        Int             @default(0)
+  createdAt    DateTime        @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
 // AI 配置：全局单例（projectId 为 null）或每本书覆盖（projectId 指向 Project）
 model AiConfig {
   id        String     @id @default(cuid())
@@ -88,6 +105,7 @@ model Project {
   activities  Activity[]
   bookRoles   BookRole[]
   aiConfig    AiConfig?
+  aiAgents    AiAgent[]
 }
 
 model ProjectMember {
@@ -181,6 +199,7 @@ model Comment {
   body           String          // 意见内容
   category       CommentCategory @default(GENERAL)
   suggestedText  String?         // 修改建议文本（可被主编一键采纳）
+  aiAgentName    String?         // 由某 AI 智能体产出时，记录其名称用于展示
   status         CommentStatus   @default(OPEN)
   createdAt      DateTime        @default(now())
 

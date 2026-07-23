@@ -11,7 +11,7 @@ import CommentMargin from "@/components/CommentMargin";
 type Comment = {
   id: string; paragraphIndex: number; quote: string; body: string;
   category: string; suggestedText: string | null; status: string; createdAt: string;
-  authorRole: string; author: { name: string; isAI: boolean };
+  authorRole: string; aiAgentName?: string | null; author: { name: string; isAI: boolean };
 };
 type RevisionMeta = {
   id: string; number: number; summary: string; createdAt: string;
@@ -43,6 +43,8 @@ export default function ManuscriptPage() {
   const [acceptAllOpen, setAcceptAllOpen] = useState(false);
   const [acceptAllSummary, setAcceptAllSummary] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  const [agents, setAgents] = useState<{ id: string; name: string; enabled: boolean }[]>([]);
+  const [reviewAgent, setReviewAgent] = useState<string>(""); // "" 默认 · "ALL" 全部启用 · agentId
   const [reviseBusy, setReviseBusy] = useState<string | null>(null);
   const [diffView, setDiffView] = useState<{ title: string; a: string; b: string } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -59,6 +61,10 @@ export default function ManuscriptPage() {
       .catch((e) => setError(e.message));
   }, [id]);
   useEffect(load, [load]);
+  useEffect(() => {
+    const pid = ms?.project.id;
+    if (pid) api<{ id: string; name: string; enabled: boolean }[]>(`/projects/${pid}/agents`).then(setAgents).catch(() => {});
+  }, [ms?.project.id]);
 
   function flash(msg: string) { setToast(msg); setTimeout(() => setToast(""), 3000); }
 
@@ -174,9 +180,21 @@ export default function ManuscriptPage() {
   async function runAI() {
     setAiBusy(true);
     try {
-      const r = await api<{ engine: string; count: number }>(`/ai/manuscripts/${id}/review`, { method: "POST" });
-      load();
-      flash(r.engine === "stub" ? `演示模式：生成 ${r.count} 条示例建议（配置 AI 密钥后启用真实审校）` : `AI 审校完成，生成 ${r.count} 条建议`);
+      if (reviewAgent === "ALL") {
+        const enabled = agents.filter((a) => a.enabled);
+        if (enabled.length === 0) { flash("没有启用的智能体"); return; }
+        let total = 0;
+        for (let k = 0; k < enabled.length; k++) {
+          flash(`智能体审校中 ${k + 1}/${enabled.length}：${enabled[k].name}…`);
+          try { const r = await api<{ count: number }>(`/ai/manuscripts/${id}/review`, { method: "POST", body: { agentId: enabled[k].id } }); total += r.count; } catch { /* 单个失败继续 */ }
+        }
+        load(); flash(`全部智能体审校完成，共生成 ${total} 条建议`);
+      } else {
+        const body = reviewAgent ? { agentId: reviewAgent } : {};
+        const r = await api<{ engine: string; count: number; agent: string | null }>(`/ai/manuscripts/${id}/review`, { method: "POST", body });
+        load();
+        flash(r.engine === "stub" ? `演示模式：生成 ${r.count} 条示例建议（配置 AI 密钥后启用真实审校）` : `${r.agent ? r.agent + " " : "AI "}审校完成，生成 ${r.count} 条建议`);
+      }
     } catch (err) { flash(err instanceof Error ? err.message : "AI 审校失败"); }
     finally { setAiBusy(false); }
   }
@@ -285,6 +303,13 @@ export default function ManuscriptPage() {
               <h2 style={{ flex: 1, margin: 0 }}>书稿正文</h2>
               {!editing && !finalized && canReview && (
                 <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(ms.content); setDraftBlocks(docBlocks ? JSON.parse(JSON.stringify(docBlocks)) : []); setSelectedPara(null); setEditing(true); }}>进入编辑</button>
+              )}
+              {agents.filter((a) => a.enabled).length > 0 && (
+                <select className="select" style={{ width: "auto", height: 32 }} value={reviewAgent} onChange={(e) => setReviewAgent(e.target.value)} disabled={aiBusy || editing} title="选择审校智能体">
+                  <option value="">默认审校</option>
+                  {agents.filter((a) => a.enabled).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  <option value="ALL">▶ 全部智能体</option>
+                </select>
               )}
               <button className="btn btn-sm" onClick={runAI} disabled={aiBusy || editing}>{aiBusy ? "AI 审校中…" : "🤖 AI 智能审校"}</button>
               {isChief && !finalized && openComments.some((c) => c.suggestedText) && (

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
-import { resolveAiConfig, runReview, runRewrite, runOptimizeComment, runScanIssue, type Suggestion } from "../lib/ai-providers.js";
+import { resolveAiConfig, runReview, runRewrite, runOptimizeComment, runScanIssue, runSuggestAgents, type Suggestion } from "../lib/ai-providers.js";
 import { normalizeDoc, blockText, type Block } from "../lib/content.js";
 
 export const aiRouter = Router();
@@ -162,6 +162,11 @@ aiRouter.post("/manuscripts/:id/review", async (req: AuthedRequest, res) => {
   const aiUser = await prisma.user.findFirst({ where: { isAI: true } });
   if (!aiUser) return res.status(500).json({ error: "系统未初始化 AI 助手账户，请先运行数据种子" });
 
+  // 可选：指定某个智能体审校（用它的专属指令 + 归属）
+  const agentId = typeof req.body?.agentId === "string" ? req.body.agentId : "";
+  const agent = agentId ? await prisma.aiAgent.findFirst({ where: { id: agentId, projectId: manuscript.projectId } }) : null;
+  if (agentId && !agent) return res.status(404).json({ error: "智能体不存在" });
+
   const paragraphs = manuscript.content.split(/\n\n/);
   const cfg = await resolveAiConfig(manuscript.projectId);
 
@@ -170,7 +175,7 @@ aiRouter.post("/manuscripts/:id/review", async (req: AuthedRequest, res) => {
 
   if (cfg) {
     try {
-      suggestions = await runReview(cfg, paragraphs, manuscript.project.standards);
+      suggestions = await runReview(cfg, paragraphs, manuscript.project.standards, agent?.systemPrompt ?? "");
       engine = `${cfg.provider.toLowerCase()}:${cfg.model}`;
     } catch (err) {
       console.error("AI review failed:", err);
@@ -194,8 +199,9 @@ aiRouter.post("/manuscripts/:id/review", async (req: AuthedRequest, res) => {
             paragraphIndex: s.paragraphIndex,
             quote: s.quote.slice(0, 200),
             body: s.issue,
-            category: s.category,
+            category: agent ? agent.category : s.category,
             suggestedText: s.suggestedParagraph,
+            aiAgentName: agent?.name ?? null,
           },
           include: { author: { select: { name: true, isAI: true } } },
         }),
@@ -203,8 +209,43 @@ aiRouter.post("/manuscripts/:id/review", async (req: AuthedRequest, res) => {
   );
 
   const me = await prisma.user.findUnique({ where: { id: req.userId! } });
-  await logActivity(manuscript.projectId, me!.name, "发起 AI 审校", `${engine} · 生成 ${created.length} 条建议`);
-  res.json({ engine, count: created.length, comments: created });
+  await logActivity(manuscript.projectId, me!.name, "发起 AI 审校", `${agent ? agent.name + " · " : ""}${engine} · 生成 ${created.length} 条建议`);
+  res.json({ engine, agent: agent?.name ?? null, count: created.length, comments: created });
+});
+
+// AI 读稿，为本书推荐量身定制的审校智能体（不落库，返回候选供主编采纳）
+aiRouter.post("/projects/:id/suggest-agents", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可生成智能体建议" });
+  const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+  if (!project) return res.status(404).json({ error: "项目不存在" });
+
+  // 构造书稿摘要：章节标题清单 + 前若干章正文（截断）
+  const chapters = await prisma.manuscript.findMany({
+    where: { projectId: req.params.id }, orderBy: { order: "asc" },
+    select: { title: true, section: true, content: true },
+  });
+  if (chapters.length === 0 || !chapters.some((c) => c.content.trim())) {
+    return res.status(400).json({ error: "书稿内容为空，请先导入或撰写章节后再生成" });
+  }
+  const toc = chapters.map((c) => `${c.section ? c.section + " / " : ""}${c.title}`).join("\n");
+  let sample = "";
+  for (const c of chapters) {
+    if (!c.content.trim()) continue;
+    sample += `\n\n【${c.title}】\n${c.content.slice(0, 2500)}`;
+    if (sample.length > 6000) break;
+  }
+  const digest = `目录：\n${toc}\n\n样章：${sample}`.slice(0, 9000);
+
+  const cfg = await resolveAiConfig(req.params.id);
+  if (!cfg) return res.status(400).json({ error: "未配置任何 AI 供应商" });
+  try {
+    const agents = await runSuggestAgents(cfg, project.title, digest);
+    res.json({ agents });
+  } catch (err) {
+    console.error("suggest-agents failed:", err);
+    res.status(502).json({ error: `AI 生成失败：${err instanceof Error ? err.message : "服务不可用"}` });
+  }
 });
 
 // 未配置任何供应商时的演示建议（便于离线体验完整流程）

@@ -154,15 +154,20 @@ export async function resolveAiConfig(projectId: string): Promise<ResolvedAi | n
 }
 
 // ===== 执行审校 =====
+// agentPrompt 非空时，用该智能体的专属指令替代默认系统提示词（仍附加修订标准与结构化输出要求）
 export async function runReview(
   cfg: ResolvedAi,
   paragraphs: string[],
   standards: string,
+  agentPrompt = "",
 ): Promise<Suggestion[]> {
   const standardsBlock = standards.trim()
     ? `\n\n本项目主编制定的修订标准（审校时须遵循）：\n${standards}`
     : "";
-  const system = SYSTEM_PROMPT + standardsBlock;
+  const base = agentPrompt.trim()
+    ? `${agentPrompt.trim()}\n\n审校要求：逐段检查，只报告确实存在的问题；每条给出修改后的完整段落文本（suggestedParagraph 为整段替换文本）；使用简体中文；最多返回 10 条最重要的建议。`
+    : SYSTEM_PROMPT;
+  const system = base + standardsBlock;
   const numbered = paragraphs.map((p, i) => `【第 ${i} 段】\n${p}`).join("\n\n");
   const userMsg = `请审校以下书稿内容，段落序号已标注：\n\n${numbered}`;
 
@@ -285,6 +290,35 @@ export async function runScanIssue(cfg: ResolvedAi, paragraphs: string[], opinio
   if (result.success) return result.data.suggestions;
   const arr = z.array(SuggestionSchema.shape.suggestions.element).safeParse(parsed);
   return arr.success ? arr.data : [];
+}
+
+// ===== AI 读稿，推荐为本书量身定制的审校智能体 =====
+export const AgentSuggestionSchema = z.object({
+  agents: z.array(
+    z.object({
+      name: z.string().describe("智能体名称（简短，体现其专长）"),
+      role: z.string().describe("一句话角色定位"),
+      systemPrompt: z.string().describe("该智能体的审校指令（详细，作为其“技能”，指导它以何种视角、查什么、按什么标准审校本书）"),
+      category: z.enum(["GENERAL", "GRAMMAR", "WORDING", "LOGIC", "STYLE", "MARKET", "STANDARD"]).describe("该智能体意见的主要归类"),
+    }),
+  ),
+});
+export type AgentSuggestion = z.infer<typeof AgentSuggestionSchema>["agents"][number];
+
+export async function runSuggestAgents(cfg: ResolvedAi, bookTitle: string, digest: string): Promise<AgentSuggestion[]> {
+  const system = `你是资深图书出版策划与审校总编。请阅读给定书稿的概要与样章，判断这本书的**体裁、题材、读者对象与专业领域**，然后为它设计一支「AI 审校智能体团队」。
+每个智能体针对本书的特点承担一类专门审校职责（例如：一部道教宫观财务书可能需要「会计准则合规」「宗教政策合规」「财务术语一致性」「表格数据准确性」「制度可操作性」等智能体；一部小说则可能需要「情节一致性」「人物弧光」「语言风格/去 AI 腔」「节奏与爽点」等）。
+为每个智能体给出：name（名称）、role（一句话定位）、systemPrompt（详细的审校指令，作为它的“技能”，写明它以什么视角、重点查什么、依据什么标准），以及 category（意见归类）。
+设计 4-6 个互补、不重复、真正贴合本书的智能体。只输出 JSON：{"agents":[{"name":string,"role":string,"systemPrompt":string,"category":"GENERAL"|"GRAMMAR"|"WORDING"|"LOGIC"|"STYLE"|"MARKET"|"STANDARD"}]}`;
+  const user = `【书名】${bookTitle}\n\n【书稿概要与样章】\n${digest}`;
+  const content = await runText(cfg, system, user, 6000);
+  const parsed = parseLenientJson(content);
+  if (!parsed) throw new Error("AI 返回结果解析失败");
+  const result = AgentSuggestionSchema.safeParse(parsed);
+  if (result.success) return result.data.agents;
+  const arr = z.array(AgentSuggestionSchema.shape.agents.element).safeParse(parsed);
+  if (arr.success) return arr.data;
+  throw new Error("AI 返回结构不符合预期");
 }
 
 // 宽松解析 LLM 返回的 JSON：先直接解析，失败则用 jsonrepair 修复（未转义引号/换行/尾逗号等）

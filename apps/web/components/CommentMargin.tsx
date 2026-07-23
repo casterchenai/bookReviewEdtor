@@ -7,7 +7,7 @@ import { CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
 export type MarginComment = {
   id: string; paragraphIndex: number; quote: string; body: string;
   category: string; suggestedText: string | null; status: string; createdAt: string;
-  authorRole: string; author: { name: string; isAI: boolean };
+  authorRole: string; aiAgentName?: string | null; author: { name: string; isAI: boolean };
 };
 
 export default function CommentMargin({
@@ -83,8 +83,8 @@ export default function CommentMargin({
             onClick={() => { setExpanded(isOpen ? null : c.id); onFocusAnchor(c.paragraphIndex); }}
           >
             <div className="mc-head">
-              <span className="mc-who">{c.author.isAI ? "🤖 " : ""}{c.author.name}</span>
-              <span className="badge badge-gray mc-role">{ROLE_LABEL[c.authorRole] ?? c.authorRole}</span>
+              <span className="mc-who">{c.author.isAI ? "🤖 " : ""}{c.aiAgentName || c.author.name}</span>
+              <span className="badge badge-gray mc-role">{c.aiAgentName ? "AI 智能体" : (ROLE_LABEL[c.authorRole] ?? c.authorRole)}</span>
               <span className="mc-anchor">¶{c.paragraphIndex + 1}</span>
               {c.status !== "OPEN" && <span className={`badge ${c.status === "ACCEPTED" ? "badge-ok" : "badge-gray"}`}>{STATUS_LABEL[c.status]}</span>}
             </div>

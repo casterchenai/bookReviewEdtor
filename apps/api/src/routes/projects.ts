@@ -379,6 +379,80 @@ projectsRouter.delete("/:id/ai-config", async (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
+// ===== 本书 AI 审校智能体（不同书不同智能体）=====
+
+const agentSchema = z.object({
+  name: z.string().min(1, "请填写智能体名称").max(60),
+  role: z.string().max(200).optional(),
+  systemPrompt: z.string().min(1, "请填写审校指令").max(8000),
+  category: z.enum(["GENERAL", "GRAMMAR", "WORDING", "LOGIC", "STYLE", "MARKET", "STANDARD"]).optional(),
+  enabled: z.boolean().optional(),
+});
+
+// 列出本书智能体（成员可见）
+projectsRouter.get("/:id/agents", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (!role) return res.status(403).json({ error: "您不是该项目成员" });
+  const agents = await prisma.aiAgent.findMany({ where: { projectId: req.params.id }, orderBy: { order: "asc" } });
+  res.json(agents);
+});
+
+// 新建智能体（仅主编）
+projectsRouter.post("/:id/agents", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可管理智能体" });
+  const parsed = agentSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const count = await prisma.aiAgent.count({ where: { projectId: req.params.id } });
+  const agent = await prisma.aiAgent.create({
+    data: {
+      projectId: req.params.id, name: parsed.data.name, role: parsed.data.role ?? "",
+      systemPrompt: parsed.data.systemPrompt, category: parsed.data.category ?? "GENERAL",
+      enabled: parsed.data.enabled ?? true, order: count,
+    },
+  });
+  res.json({ id: agent.id });
+});
+
+// 批量新建（供 AI 读稿推荐后一键采纳）
+projectsRouter.post("/:id/agents/batch", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可管理智能体" });
+  const parsed = z.object({ agents: z.array(agentSchema).max(20) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const base = await prisma.aiAgent.count({ where: { projectId: req.params.id } });
+  await prisma.aiAgent.createMany({
+    data: parsed.data.agents.map((a, i) => ({
+      projectId: req.params.id, name: a.name, role: a.role ?? "",
+      systemPrompt: a.systemPrompt, category: a.category ?? "GENERAL",
+      enabled: a.enabled ?? true, order: base + i,
+    })),
+  });
+  res.json({ ok: true, count: parsed.data.agents.length });
+});
+
+// 更新智能体（仅主编）
+projectsRouter.patch("/:id/agents/:agentId", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可管理智能体" });
+  const parsed = agentSchema.partial().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const agent = await prisma.aiAgent.findFirst({ where: { id: req.params.agentId, projectId: req.params.id } });
+  if (!agent) return res.status(404).json({ error: "智能体不存在" });
+  await prisma.aiAgent.update({ where: { id: agent.id }, data: parsed.data });
+  res.json({ ok: true });
+});
+
+// 删除智能体（仅主编）
+projectsRouter.delete("/:id/agents/:agentId", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可管理智能体" });
+  const agent = await prisma.aiAgent.findFirst({ where: { id: req.params.agentId, projectId: req.params.id } });
+  if (!agent) return res.status(404).json({ error: "智能体不存在" });
+  await prisma.aiAgent.delete({ where: { id: agent.id } });
+  res.json({ ok: true });
+});
+
 // 新建书稿章节（可选：上传 HTML / Markdown 解析为结构化内容）
 projectsRouter.post("/:id/manuscripts", async (req: AuthedRequest, res) => {
   const role = await memberRole(req.params.id, req.userId!);
