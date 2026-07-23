@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { diffChars } from "diff";
 import TopBar from "@/components/TopBar";
-import { api, downloadFile, openFile, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
-import { RichDocView, RichDocEditor, parseDoc, blockPreview, renderHighlight, type Block } from "@/components/RichDoc";
+import { api, downloadFile, openFile, getUser, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
+import { RichDocView, RichDocEditor, parseDoc, blockPreview, renderHighlight, type Block, type Mark } from "@/components/RichDoc";
+import PageAnnotator from "@/components/PageAnnotator";
 import CommentMargin from "@/components/CommentMargin";
 import CommentMinimap from "@/components/CommentMinimap";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -60,6 +61,9 @@ export default function ManuscriptPage() {
   const [cmpA, setCmpA] = useState<string>("");
   const [cmpB, setCmpB] = useState<string>("current");
   const [toast, setToast] = useState("");
+  const [annotIndex, setAnnotIndex] = useState<number | null>(null); // 正在批注的页面块序号
+  const [ocrBusyIndex, setOcrBusyIndex] = useState<number | null>(null);
+  const [ocrChapterBusy, setOcrChapterBusy] = useState(false);
   const docRef = useRef<HTMLDivElement>(null);
   const revCache = useRef<Map<number, string>>(new Map());
 
@@ -96,6 +100,37 @@ export default function ManuscriptPage() {
   }
   const isChief = ms.myRole === "CHIEF_EDITOR";
   const canReview = ms.myRole !== "AI_ASSISTANT";
+  // 本章是否包含 PDF 页面块（决定是否显示批注/识别相关入口）
+  const hasPages = isRich && docBlocks.some((b) => b.type === "image" && !!b.page);
+  const annotCandidate = annotIndex === null || !docBlocks ? null : docBlocks[annotIndex] ?? null;
+  const annotBlock = annotCandidate && annotCandidate.type === "image" ? annotCandidate : null;
+
+  async function saveMarks(index: number, marks: Mark[]) {
+    await api(`/manuscripts/${id}/blocks/${index}/marks`, { method: "PATCH", body: { marks } });
+    setAnnotIndex(null); load(); flash("批注已保存");
+  }
+  async function ocrPage(index: number) {
+    setOcrBusyIndex(index);
+    try {
+      const r = await api<{ updated: number }>(`/manuscripts/${id}/ocr`, { method: "POST", body: { blockIndex: index, force: true } });
+      load(); flash(r.updated ? "本页文字识别完成" : "本页未识别到文字");
+    } catch (e) { flash(e instanceof Error ? e.message : "识别失败"); }
+    finally { setOcrBusyIndex(null); }
+  }
+  async function ocrChapter() {
+    if (ocrChapterBusy) return;
+    if (!(await confirm({
+      title: "整章文字识别",
+      body: "将对本章所有尚未识别的页面图片进行文字识别，页数较多时可能需要几分钟。识别结果只用于 AI 审校与报告引用，不会改动页面图片。继续？",
+      confirmText: "开始识别",
+    }))) return;
+    setOcrChapterBusy(true);
+    try {
+      const r = await api<{ updated: number; scanned: number }>(`/manuscripts/${id}/ocr`, { method: "POST", body: {} });
+      load(); flash(`识别完成：新识别 ${r.updated} 页（共 ${r.scanned} 页）`);
+    } catch (e) { flash(e instanceof Error ? e.message : "识别失败"); }
+    finally { setOcrChapterBusy(false); }
+  }
   const finalized = ms.status === "FINALIZED";
   const openComments = ms.comments.filter((c) => c.status === "OPEN");
   const countByPara = new Map<number, number>();
@@ -338,6 +373,12 @@ export default function ManuscriptPage() {
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=docx`).catch((e) => flash(e.message))}>导出 Word</button>
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=md`).catch((e) => flash(e.message))}>导出 MD</button>
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=html`).catch((e) => flash(e.message))}>导出 HTML</button>
+          {hasPages && canReview && !finalized && (
+            <button className="btn btn-ghost btn-sm" onClick={ocrChapter} disabled={ocrChapterBusy}
+              title="识别本章所有页面图片中的文字，供 AI 审校（不改动图片）">
+              {ocrChapterBusy ? "识别中…" : "整章识别文字"}
+            </button>
+          )}
           <button className="btn btn-ghost btn-sm" onClick={() => openFile(`/manuscripts/${id}/report?inline=1`).catch((e) => flash(e.message))} title="按页/段汇总审校意见，供排版设计师修改 PDF">预览审校报告</button>
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/report?format=docx`).catch((e) => flash(e.message))}>审校报告 Word</button>
           {isChief && (
@@ -406,6 +447,10 @@ export default function ManuscriptPage() {
                   onSelect={(i) => setSelectedPara(selectedPara === i ? null : i)}
                   countByIndex={countByPara} idPrefix="u-" renderAfter={composer}
                   highlight={search.trim()}
+                  canEdit={canReview && !finalized}
+                  onAnnotate={(i) => setAnnotIndex(i)}
+                  onOcrPage={ocrPage}
+                  ocrBusyIndex={ocrBusyIndex}
                 />
               )
             ) : (
@@ -561,6 +606,16 @@ export default function ManuscriptPage() {
           </div>
         )}
       </main>
+      {annotBlock && annotIndex !== null && annotBlock.src && (
+        <PageAnnotator
+          src={annotBlock.src}
+          label={annotBlock.alt || `第 ${annotBlock.page ?? annotIndex + 1} 页`}
+          initial={annotBlock.marks ?? []}
+          author={getUser()?.name ?? ""}
+          onSave={(marks) => saveMarks(annotIndex, marks)}
+          onClose={() => setAnnotIndex(null)}
+        />
+      )}
       {toast && <div className="toast">{toast}</div>}
     </>
   );

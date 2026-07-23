@@ -3,10 +3,11 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { AI_PROVIDERS, sanitizeAiConfig } from "../lib/ai-providers.js";
-import { parseHtml, parseMarkdown, normalizeDoc, blocksToHtml, blocksToMarkdown, textToMarkdown, type Block } from "../lib/content.js";
+import { parseHtml, parseMarkdown, normalizeDoc, blocksToHtml, blocksToMarkdown, blocksToText, textToMarkdown, type Block } from "../lib/content.js";
 import { parsePdfRich } from "../lib/pdf.js";
 import { bookToDocx } from "../lib/docx.js";
 import { extractReference } from "../lib/references.js";
+import { isOcrAvailable, ocrPageBlocks } from "../lib/ocr.js";
 
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
@@ -612,6 +613,62 @@ projectsRouter.post("/:id/manuscripts", async (req: AuthedRequest, res) => {
   });
   await logActivity(req.params.id, me!.name, "新建书稿", parsed.data.title + (docJson ? "（导入解析）" : ""));
   res.json({ id: manuscript.id });
+});
+
+// 调整章节顺序（仅主编）：按传入的 id 顺序重排 order
+projectsRouter.patch("/:id/manuscripts/order", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可调整章节顺序" });
+
+  const parsed = z.object({ ids: z.array(z.string().min(1)).min(1).max(5000) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const owned = await prisma.manuscript.findMany({ where: { projectId: req.params.id }, select: { id: true } });
+  const ownedIds = new Set(owned.map((o) => o.id));
+  if (parsed.data.ids.length !== ownedIds.size || !parsed.data.ids.every((i) => ownedIds.has(i))) {
+    return res.status(400).json({ error: "章节列表与本书不匹配，请刷新后重试" });
+  }
+
+  await prisma.$transaction(
+    parsed.data.ids.map((mid, i) => prisma.manuscript.update({ where: { id: mid }, data: { order: i } })),
+  );
+  const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+  await logActivity(req.params.id, me!.name, "调整章节顺序");
+  res.json({ ok: true });
+});
+
+// 整书文字识别（OCR）：对全书所有页面图片识别文字（隐藏存入各页，不改图）
+projectsRouter.post("/:id/ocr", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (!role || role === "AI_ASSISTANT") return res.status(403).json({ error: "无权限" });
+  if (!(await isOcrAvailable())) return res.status(503).json({ error: "服务器未安装文字识别组件（tesseract），请联系管理员" });
+
+  const force = z.object({ force: z.boolean().optional() }).safeParse(req.body ?? {}).data?.force ?? false;
+  const chapters = await prisma.manuscript.findMany({
+    where: { projectId: req.params.id },
+    orderBy: { order: "asc" },
+    select: { id: true, docJson: true },
+  });
+
+  let updated = 0, scanned = 0, touched = 0;
+  for (const m of chapters) {
+    const doc = m.docJson ? normalizeDoc(JSON.parse(m.docJson)) : null;
+    if (!doc) continue;
+    const r = await ocrPageBlocks(doc.blocks, { force });
+    scanned += r.scanned;
+    if (r.updated > 0) {
+      await prisma.manuscript.update({
+        where: { id: m.id },
+        data: { docJson: JSON.stringify({ blocks: r.blocks }), content: blocksToText(r.blocks) },
+      });
+      updated += r.updated; touched++;
+    }
+  }
+  if (updated > 0) {
+    const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+    await logActivity(req.params.id, me!.name, "整书文字识别", `识别 ${updated} 页，涉及 ${touched} 章`);
+  }
+  res.json({ updated, scanned, chapters: touched });
 });
 
 export function roleLabel(role: string) {

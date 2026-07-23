@@ -4,9 +4,10 @@ import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { roleLabel } from "./projects.js";
 import {
-  blocksToText, normalizeDoc, setBlockText, type Block,
+  blocksToText, normalizeDoc, setBlockText, type Block, type Mark,
   blocksToMarkdown, blocksToHtml, textToMarkdown, textToHtml,
 } from "../lib/content.js";
+import { isOcrAvailable, ocrPageBlocks } from "../lib/ocr.js";
 import { manuscriptToDocx, reviewReportDocx } from "../lib/docx.js";
 import { buildReport, reviewReportHtml, type ReportComment } from "../lib/report.js";
 
@@ -80,6 +81,23 @@ manuscriptsRouter.patch("/:id/title", async (req: AuthedRequest, res) => {
   res.json({ ok: true, title: parsed.data.title });
 });
 
+// 删除章节（仅主编）：连同其修订与意见一并删除，并重排剩余章节顺序
+manuscriptsRouter.delete("/:id", async (req: AuthedRequest, res) => {
+  const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
+  if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可删除章节" });
+
+  await prisma.manuscript.delete({ where: { id: manuscript.id } }); // 修订/意见按级联删除
+  const rest = await prisma.manuscript.findMany({
+    where: { projectId: manuscript.projectId }, orderBy: { order: "asc" }, select: { id: true },
+  });
+  await prisma.$transaction(rest.map((m, i) => prisma.manuscript.update({ where: { id: m.id }, data: { order: i } })));
+
+  const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+  await logActivity(manuscript.projectId, me!.name, "删除章节", manuscript.title);
+  res.json({ ok: true });
+});
+
 // 导出单章为 Markdown / HTML / Word(docx)
 manuscriptsRouter.get("/:id/export", async (req: AuthedRequest, res) => {
   const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
@@ -139,6 +157,71 @@ manuscriptsRouter.get("/:id/report", async (req: AuthedRequest, res) => {
   const inline = req.query.inline === "1";
   res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}.html`);
   res.send(html);
+});
+
+// 页面文字识别（OCR）：识别页面图片中的文字，隐藏存入该页 ocr 字段。
+// 不改动图片、不新建修订版本；仅刷新纯文本投影，使 AI 审校与搜索能读到图中文字。
+// body: { blockIndex?: number（只识别该页，省略则整章）, force?: boolean（重识别已有结果）}
+manuscriptsRouter.post("/:id/ocr", async (req: AuthedRequest, res) => {
+  const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
+  if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
+  if (!role || role === "AI_ASSISTANT") return res.status(403).json({ error: "无权限" });
+  if (!(await isOcrAvailable())) return res.status(503).json({ error: "服务器未安装文字识别组件（tesseract），请联系管理员" });
+
+  const schema = z.object({ blockIndex: z.number().int().min(0).optional(), force: z.boolean().optional() });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const doc = manuscript.docJson ? normalizeDoc(JSON.parse(manuscript.docJson)) : null;
+  if (!doc) return res.status(400).json({ error: "该书稿没有可识别的页面" });
+
+  const { blocks, updated, scanned } = await ocrPageBlocks(doc.blocks, parsed.data);
+  if (!scanned) return res.status(400).json({ error: "该书稿没有可识别的页面图片" });
+  if (updated > 0) {
+    const content = blocksToText(blocks);
+    await prisma.manuscript.update({
+      where: { id: manuscript.id },
+      data: { docJson: JSON.stringify({ blocks }), content },
+    });
+    const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+    await logActivity(manuscript.projectId, me!.name, "文字识别", `${manuscript.title}：识别 ${updated} 页`);
+  }
+  res.json({ updated, scanned });
+});
+
+const markSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("rect"), x: z.number(), y: z.number(), w: z.number(), h: z.number(), color: z.string().max(24), by: z.string().max(60).optional() }),
+  z.object({ kind: z.literal("pen"), pts: z.array(z.number()).max(6000), color: z.string().max(24), by: z.string().max(60).optional() }),
+  z.object({ kind: z.literal("text"), x: z.number(), y: z.number(), text: z.string().max(500), color: z.string().max(24), by: z.string().max(60).optional() }),
+]);
+
+// 页面批注：就地更新某个块的 marks（画框/涂鸦/文字），全员可见。
+// 批注属于评审标记而非正文改动，因此不新建修订版本。
+manuscriptsRouter.patch("/:id/blocks/:index/marks", async (req: AuthedRequest, res) => {
+  const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
+  if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
+  if (!role || role === "AI_ASSISTANT") return res.status(403).json({ error: "无权限" });
+
+  const index = Number(req.params.index);
+  if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: "块序号无效" });
+
+  const parsed = z.object({ marks: z.array(markSchema).max(500) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const doc = manuscript.docJson ? normalizeDoc(JSON.parse(manuscript.docJson)) : null;
+  if (!doc || !doc.blocks[index]) return res.status(404).json({ error: "该内容块不存在" });
+  const target = doc.blocks[index];
+  if (target.type !== "image") return res.status(400).json({ error: "只能在图片/页面块上批注" });
+
+  const blocks = doc.blocks.slice();
+  blocks[index] = { ...target, marks: parsed.data.marks as Mark[] };
+  await prisma.manuscript.update({
+    where: { id: manuscript.id },
+    data: { docJson: JSON.stringify({ blocks }), content: blocksToText(blocks) },
+  });
+  const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+  await logActivity(manuscript.projectId, me!.name, "页面批注", `${manuscript.title}：${target.alt || `第 ${index + 1} 块`}（${parsed.data.marks.length} 处）`);
+  res.json({ ok: true, marks: parsed.data.marks.length });
 });
 
 // 保存内容 → 生成新修订版本

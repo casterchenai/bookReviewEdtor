@@ -1,5 +1,5 @@
 // 审校报告：把书稿的审校意见按「页 / 段落」汇总，供排版设计师据此修改 PDF。
-import type { Block } from "./content.js";
+import type { Block, Mark } from "./content.js";
 
 export interface ReportComment {
   paragraphIndex: number;
@@ -13,9 +13,17 @@ export interface ReportComment {
   status: string;
 }
 
+export interface ReportMark {
+  kind: string;      // rect / pen / text
+  color: string;
+  by?: string;
+  text?: string;     // 仅文字批注有
+}
+
 export interface ReportGroup {
   page: string;          // 页标签，如「第 3 页」；无分页信息时为「正文」
-  pageKind?: string;     // text / gallery
+  pageKind?: string;     // text / gallery / page
+  marks: ReportMark[];   // 该页上的持久批注
   items: (ReportComment & { blockText: string })[];
 }
 
@@ -30,15 +38,31 @@ const STATUS_LABEL: Record<string, string> = {
 };
 export function statusLabel(s: string) { return STATUS_LABEL[s] ?? s; }
 
-// 为每个块序号计算所属「页」标签（取其前最近的 page 块）；并给出块的文字投影
-function pageIndex(blocks: Block[] | null): { pageOf: (i: number) => { label: string; kind?: string }; textOf: (i: number) => string } {
-  if (!blocks) return { pageOf: () => ({ label: "正文" }), textOf: () => "" };
-  const map: { label: string; kind?: string }[] = [];
-  let cur = { label: "正文", kind: undefined as string | undefined };
+interface PageInfo { label: string; kind?: string; marks: Mark[] }
+
+// 为每个块序号计算所属「页」；PDF 现在是一页一块（image + page），旧格式的 page 标记块也兼容。
+function pageIndex(blocks: Block[] | null): {
+  pageOf: (i: number) => PageInfo;
+  textOf: (i: number) => string;
+  pages: PageInfo[];
+} {
+  const fallback: PageInfo = { label: "正文", marks: [] };
+  if (!blocks) return { pageOf: () => fallback, textOf: () => "", pages: [fallback] };
+
+  const map: PageInfo[] = [];
+  const pages: PageInfo[] = [];
+  let cur: PageInfo = fallback;
   blocks.forEach((b, i) => {
-    if (b.type === "page") cur = { label: b.label, kind: b.pageKind };
+    if (b.type === "image" && b.page) {
+      cur = { label: b.alt || `第 ${b.page} 页`, kind: "page", marks: b.marks ?? [] };
+    } else if (b.type === "page") {
+      cur = { label: b.label, kind: b.pageKind, marks: [] }; // 兼容旧解析格式
+    }
     map[i] = cur;
+    if (!pages.includes(cur)) pages.push(cur);
   });
+  if (!pages.length) pages.push(fallback);
+
   const textOf = (i: number) => {
     const b = blocks[i];
     if (!b) return "";
@@ -46,25 +70,36 @@ function pageIndex(blocks: Block[] | null): { pageOf: (i: number) => { label: st
       case "heading": case "para": case "note": return b.text;
       case "list": return b.items.join("；");
       case "table": return b.rows.map((r) => r.cells.join(" | ")).join(" / ");
-      case "image": return `［图片：${b.alt || "无说明"}］`;
+      // 页面块：引用隐藏的识别文字，便于排版定位；普通图片用图注
+      case "image": return b.page ? (b.ocr ?? "").trim() : `［图片：${b.alt || "无说明"}］`;
       case "page": return "";
     }
   };
-  return { pageOf: (i) => map[i] ?? cur, textOf };
+  return { pageOf: (i) => map[i] ?? cur, textOf, pages };
 }
 
-// 汇总：按页分组，组内按段落序号排序
+function toReportMark(m: Mark): ReportMark {
+  return { kind: m.kind, color: m.color, by: m.by, text: m.kind === "text" ? m.text : undefined };
+}
+
+// 汇总：按页（文档顺序）分组，组内按段落序号排序。
+// 只有批注、没有文字意见的页也会列出，便于排版按标注修改。
 export function buildReport(blocks: Block[] | null, comments: ReportComment[]): ReportGroup[] {
-  const { pageOf, textOf } = pageIndex(blocks);
-  const groups = new Map<string, ReportGroup>();
-  const order: string[] = [];
+  const { pageOf, textOf, pages } = pageIndex(blocks);
+  const byPage = new Map<PageInfo, (ReportComment & { blockText: string })[]>();
   const sorted = [...comments].sort((a, b) => a.paragraphIndex - b.paragraphIndex);
   for (const c of sorted) {
     const p = pageOf(c.paragraphIndex);
-    if (!groups.has(p.label)) { groups.set(p.label, { page: p.label, pageKind: p.kind, items: [] }); order.push(p.label); }
-    groups.get(p.label)!.items.push({ ...c, blockText: c.quote || textOf(c.paragraphIndex) });
+    if (!byPage.has(p)) byPage.set(p, []);
+    byPage.get(p)!.push({ ...c, blockText: c.quote || textOf(c.paragraphIndex) });
   }
-  return order.map((k) => groups.get(k)!);
+  const out: ReportGroup[] = [];
+  for (const p of pages) {
+    const items = byPage.get(p) ?? [];
+    if (!items.length && !p.marks.length) continue;
+    out.push({ page: p.label, pageKind: p.kind, marks: p.marks.map(toReportMark), items });
+  }
+  return out;
 }
 
 function esc(s: string) {
@@ -92,8 +127,18 @@ export function reviewReportHtml(
       </tr>`;
     }).join("");
     const kind = g.pageKind === "gallery" ? " · 图册页" : g.pageKind === "text" ? " · 文本页" : "";
-    return `<h2 class="pg">${esc(g.page)}${kind}<span class="cn">${g.items.length} 条</span></h2>
-      <table class="rep"><thead><tr><th>位置</th><th>类别</th><th>审校意见 / 修改建议</th><th>审校人</th></tr></thead><tbody>${body}</tbody></table>`;
+    const marksBlock = g.marks.length ? `<div class="marks"><b>页面批注 ${g.marks.length} 处：</b>${
+      g.marks.map((m) => {
+        const who = m.by ? `（${esc(m.by)}）` : "";
+        const label = m.kind === "text" ? `文字「${esc(m.text || "")}」` : m.kind === "rect" ? "框选" : "涂鸦";
+        return `<span class="mk" style="border-color:${esc(m.color)}">${label}${who}</span>`;
+      }).join(" ")
+    }</div>` : "";
+    const table = g.items.length
+      ? `<table class="rep"><thead><tr><th>位置</th><th>类别</th><th>审校意见 / 修改建议</th><th>审校人</th></tr></thead><tbody>${body}</tbody></table>`
+      : `<p class="nocmt">本页无文字意见，仅有图上批注。</p>`;
+    return `<h2 class="pg">${esc(g.page)}${kind}<span class="cn">${g.items.length} 条意见${g.marks.length ? ` · ${g.marks.length} 处批注` : ""}</span></h2>
+      ${marksBlock}${table}`;
   }).join("\n");
 
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8">
@@ -116,6 +161,9 @@ export function reviewReportHtml(
   .quote { background: #fafafa; border-left: 3px solid #ccc; padding: 4px 8px; color: #555; font-size: 0.85rem; margin-bottom: 6px; }
   .body { white-space: pre-wrap; }
   .sug { margin-top: 6px; background: #f0fbf3; border-left: 3px solid #4caf50; padding: 4px 8px; font-size: 0.88rem; }
+  .marks { margin: 6px 0 10px; font-size: 0.88rem; color: #444; }
+  .mk { display: inline-block; border: 2px solid #999; border-radius: 4px; padding: 1px 7px; margin: 2px 4px 2px 0; background: #fff; }
+  .nocmt { color: #999; font-size: 0.9rem; margin: 4px 0 12px; }
   @media print { .pg { break-after: avoid; } tr { break-inside: avoid; } }
 </style></head><body>
 <h1>${esc(title)} · 审校报告</h1>

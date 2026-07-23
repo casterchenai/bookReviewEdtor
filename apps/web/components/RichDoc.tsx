@@ -3,14 +3,50 @@
 import { useState } from "react";
 import { useConfirm } from "@/components/ConfirmProvider";
 
+// 图片/页面上的持久批注（归一化坐标 0..1，随图缩放）
+export type Mark =
+  | { kind: "rect"; x: number; y: number; w: number; h: number; color: string; by?: string }
+  | { kind: "pen"; pts: number[]; color: string; by?: string }
+  | { kind: "text"; x: number; y: number; text: string; color: string; by?: string };
+
 export type Block =
   | { type: "heading"; level: number; text: string }
   | { type: "para"; text: string }
   | { type: "note"; text: string }
   | { type: "list"; ordered: boolean; items: string[] }
   | { type: "table"; rows: { cells: string[]; header: boolean }[] }
-  | { type: "image"; src: string; alt: string }
+  // 含 page 时为 PDF「页面块」：整页图 + 隐藏的识别文字 ocr + 持久批注 marks
+  | { type: "image"; src: string; alt: string; page?: number; ocr?: string; marks?: Mark[] }
   | { type: "page"; pageKind: "text" | "gallery"; label: string };
+
+// 批注覆盖层：形状走 SVG（non-scaling-stroke 保证线宽不被拉伸），文字用绝对定位避免变形
+export function MarksOverlay({ marks }: { marks: Mark[] }) {
+  if (!marks.length) return null;
+  return (
+    <>
+      <svg className="marks-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden>
+        {marks.map((m, i) => {
+          if (m.kind === "rect") {
+            return <rect key={i} x={m.x * 1000} y={m.y * 1000} width={m.w * 1000} height={m.h * 1000}
+              fill="none" stroke={m.color} strokeWidth={2} vectorEffect="non-scaling-stroke" />;
+          }
+          if (m.kind === "pen") {
+            const pts: string[] = [];
+            for (let k = 0; k + 1 < m.pts.length; k += 2) pts.push(`${m.pts[k] * 1000},${m.pts[k + 1] * 1000}`);
+            return <polyline key={i} points={pts.join(" ")} fill="none" stroke={m.color} strokeWidth={2}
+              strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />;
+          }
+          return null;
+        })}
+      </svg>
+      {marks.map((m, i) => m.kind === "text" ? (
+        <span key={`t${i}`} className="mark-text" style={{ left: `${m.x * 100}%`, top: `${m.y * 100}%`, color: m.color, borderColor: m.color }}>
+          {m.text}
+        </span>
+      ) : null)}
+    </>
+  );
+}
 
 export function parseDoc(docJson: string): Block[] | null {
   if (!docJson) return null;
@@ -25,7 +61,10 @@ export function blockPreview(b: Block): string {
     case "heading": case "para": case "note": return b.text;
     case "list": return b.items.join("；");
     case "table": return b.rows[0]?.cells.join(" | ") ?? "表格";
-    case "image": return b.alt || "图片";
+    case "image":
+      return b.page
+        ? `${b.alt || `第 ${b.page} 页`}${(b.ocr ?? "").trim() ? "（含识别文字）" : ""}`
+        : (b.alt || "图片");
     case "page": return `${b.label}·${b.pageKind === "gallery" ? "图册页" : "文本页"}`;
   }
 }
@@ -53,6 +92,7 @@ export function renderHighlight(text: string, term: string): React.ReactNode {
 // ===== 只读渲染（可点击选中以评论）=====
 export function RichDocView({
   blocks, selectedIndex, onSelect, countByIndex, idPrefix, renderAfter, highlight = "",
+  onAnnotate, onOcrPage, ocrBusyIndex = null, canEdit = false,
 }: {
   blocks: Block[];
   selectedIndex: number | null;
@@ -61,6 +101,10 @@ export function RichDocView({
   idPrefix?: string;
   renderAfter?: (i: number) => React.ReactNode;
   highlight?: string;
+  onAnnotate?: (i: number) => void;      // 打开该页的批注编辑器
+  onOcrPage?: (i: number) => void;       // 识别该页文字
+  ocrBusyIndex?: number | null;
+  canEdit?: boolean;                     // 是否显示批注/识别按钮
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
   return (
@@ -74,8 +118,15 @@ export function RichDocView({
             title="点击以对此块发表审阅意见"
             onClick={() => onSelect(i)}
           >
-            <span className="p-index">¶{i + 1}{b.type !== "para" && b.type !== "heading" ? ` ${BLOCK_TAG[b.type] ?? ""}` : ""}</span>
-            <BlockBody b={b} hl={highlight} onImageClick={setLightbox} />
+            <span className="p-index">
+              ¶{i + 1}{b.type !== "para" && b.type !== "heading" ? ` ${b.type === "image" && b.page ? "页" : BLOCK_TAG[b.type] ?? ""}` : ""}
+            </span>
+            <BlockBody
+              b={b} hl={highlight} onImageClick={setLightbox}
+              onAnnotate={onAnnotate ? () => onAnnotate(i) : undefined}
+              onOcrPage={onOcrPage ? () => onOcrPage(i) : undefined}
+              ocrBusy={ocrBusyIndex === i} canEdit={canEdit}
+            />
           </div>
           {renderAfter?.(i)}
         </div>
@@ -90,7 +141,10 @@ export function RichDocView({
   );
 }
 
-function BlockBody({ b, hl = "", onImageClick }: { b: Block; hl?: string; onImageClick?: (src: string) => void }) {
+function BlockBody({ b, hl = "", onImageClick, onAnnotate, onOcrPage, ocrBusy = false, canEdit = false }: {
+  b: Block; hl?: string; onImageClick?: (src: string) => void;
+  onAnnotate?: () => void; onOcrPage?: () => void; ocrBusy?: boolean; canEdit?: boolean;
+}) {
   const H = (t: string) => hl ? renderHighlight(t, hl) : t;
   switch (b.type) {
     case "heading":
@@ -113,10 +167,41 @@ function BlockBody({ b, hl = "", onImageClick }: { b: Block; hl?: string; onImag
           </table>
         </div>
       );
-    case "image":
+    case "image": {
+      // PDF 页面块：整页图 + 图上工具条；点击图片本身仍冒泡到块，弹出评审对话
+      if (b.page) {
+        const marks = b.marks ?? [];
+        return (
+          <div className="rb-page-block">
+            <div className="rb-page-label">
+              {b.alt || `第 ${b.page} 页`}
+              {marks.length > 0 && <span className="rb-page-chip mk">{marks.length} 处批注</span>}
+              {(b.ocr ?? "").trim() && <span className="rb-page-chip ocr">已识别文字</span>}
+            </div>
+            <div className="rb-page-figure">
+              {b.src
+                ? <img className="rb-page-img" src={b.src} alt={b.alt} />
+                : <div className="rb-img-ph">🖼 本页未渲染图片</div>}
+              <MarksOverlay marks={marks} />
+              <div className="rb-page-tools" onClick={(e) => e.stopPropagation()}>
+                {b.src && <button type="button" className="pg-tool" title="放大查看" onClick={() => onImageClick?.(b.src)}>🔍</button>}
+                {canEdit && b.src && onAnnotate && (
+                  <button type="button" className="pg-tool" title="标注 / 涂鸦笔" onClick={onAnnotate}>✏️</button>
+                )}
+                {canEdit && b.src && onOcrPage && (
+                  <button type="button" className="pg-tool" title="识别本页文字（供 AI 审校，不改动图片）" disabled={ocrBusy} onClick={onOcrPage}>
+                    {ocrBusy ? "…" : "🔤"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      }
       return b.src
         ? <img className="rb-img zoomable" src={b.src} alt={b.alt} title="点击放大" onClick={(e) => { e.stopPropagation(); onImageClick?.(b.src); }} />
         : <div className="rb-img-ph">🖼 {b.alt || "（图片）"}</div>;
+    }
     case "page":
       return <div className={`rb-page ${b.pageKind}`}>{b.label} · {b.pageKind === "gallery" ? "图册页" : "文本页"}</div>;
   }
@@ -198,7 +283,17 @@ function BlockEditor({ b, onChange }: { b: Block; onChange: (b: Block) => void }
     return (
       <div>
         {b.src ? <img className="rb-img" src={b.src} alt={b.alt} /> : <div className="rb-img-ph">🖼 无图片数据</div>}
-        <input className="input" style={{ marginTop: 8 }} value={b.alt} onChange={(e) => onChange({ ...b, alt: e.target.value })} placeholder="图片说明 / 替代文字" />
+        <input className="input" style={{ marginTop: 8 }} value={b.alt} onChange={(e) => onChange({ ...b, alt: e.target.value })}
+          placeholder={b.page ? "页标签，例如：第 3 页" : "图片说明 / 替代文字"} />
+        {b.page && (
+          <>
+            <div className="muted small" style={{ marginTop: 8 }}>
+              识别文字（不在正文显示，仅供 AI 审校与报告引用，可在此更正识别错误）
+            </div>
+            <textarea className="textarea" rows={5} value={b.ocr ?? ""} onChange={(e) => onChange({ ...b, ocr: e.target.value })}
+              placeholder="尚未识别。可在页面图上点「🔤」识别，或在此手工录入。" />
+          </>
+        )}
       </div>
     );
   }

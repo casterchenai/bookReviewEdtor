@@ -4,13 +4,21 @@ import * as cheerio from "cheerio";
 import { marked } from "marked";
 import type { AnyNode } from "domhandler";
 
+// 图片/页面上的持久批注（归一化坐标 0..1，随图缩放）
+export type Mark =
+  | { kind: "rect"; x: number; y: number; w: number; h: number; color: string; by?: string }
+  | { kind: "pen"; pts: number[]; color: string; by?: string } // 扁平点串 [x0,y0,x1,y1,...]
+  | { kind: "text"; x: number; y: number; text: string; color: string; by?: string };
+
 export type Block =
   | { type: "heading"; level: number; text: string }
   | { type: "para"; text: string }
   | { type: "note"; text: string }
   | { type: "list"; ordered: boolean; items: string[] }
   | { type: "table"; rows: { cells: string[]; header: boolean }[] }
-  | { type: "image"; src: string; alt: string }
+  // image 兼具「普通图片」与「PDF 页面块」：含 page 字段时按整页渲染，
+  // ocr 为隐藏的识别/抽取文字（供 AI 审校、报告引用，不在正文显示），marks 为持久批注
+  | { type: "image"; src: string; alt: string; page?: number; ocr?: string; marks?: Mark[] }
   | { type: "page"; pageKind: "text" | "gallery"; label: string };
 
 export interface Doc {
@@ -127,7 +135,17 @@ export function blocksToText(blocks: Block[]): string {
       case "note": parts.push(b.text); break;
       case "list": parts.push(b.items.map((i) => `· ${i}`).join("\n")); break;
       case "table": parts.push(b.rows.map((r) => r.cells.join(" | ")).join("\n")); break;
-      case "image": parts.push(b.alt ? `［图片：${b.alt}］` : "［图片］"); break;
+      case "image": {
+        if (b.page) {
+          // PDF 页面块：用「第 N 页」标签 + 识别文字（ocr）投影，供 AI 审校/搜索/报告引用
+          const notes = (b.marks ?? []).filter((m): m is Extract<Mark, { kind: "text" }> => m.kind === "text").map((m) => m.text).filter(Boolean);
+          const body = [b.ocr?.trim(), notes.length ? notes.map((t) => `［批注：${t}］`).join(" ") : ""].filter(Boolean).join("\n");
+          parts.push(`【${b.alt || `第 ${b.page} 页`}】${body ? `\n${body}` : ""}`);
+        } else {
+          parts.push(b.alt ? `［图片：${b.alt}］` : "［图片］");
+        }
+        break;
+      }
       case "page": parts.push(`【${b.label}·${b.pageKind === "gallery" ? "图册页" : "文本页"}】`); break;
     }
   }

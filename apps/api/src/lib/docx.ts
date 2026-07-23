@@ -76,7 +76,22 @@ export async function reviewReportDocx(
 
   for (const g of groups) {
     const kind = g.pageKind === "gallery" ? " · 图册页" : g.pageKind === "text" ? " · 文本页" : "";
-    body.push(new Paragraph({ text: `${g.page}${kind}（${g.items.length} 条）`, heading: HeadingLevel.HEADING_2, spacing: { before: 200 } }));
+    const counts = `${g.items.length} 条意见${g.marks.length ? ` · ${g.marks.length} 处批注` : ""}`;
+    body.push(new Paragraph({ text: `${g.page}${kind}（${counts}）`, heading: HeadingLevel.HEADING_2, spacing: { before: 200 } }));
+    if (g.marks.length) {
+      const desc = g.marks.map((m) => {
+        const label = m.kind === "text" ? `文字「${m.text || ""}」` : m.kind === "rect" ? "框选" : "涂鸦";
+        return label + (m.by ? `（${m.by}）` : "");
+      }).join("；");
+      body.push(new Paragraph({ children: [
+        new TextRun({ text: "页面批注：", bold: true, color: "b26500" }),
+        new TextRun({ text: desc, color: "b26500" }),
+      ], spacing: { after: 100 } }));
+    }
+    if (!g.items.length) {
+      body.push(new Paragraph({ children: [new TextRun({ text: "本页无文字意见，仅有图上批注。", italics: true, color: "999999" })] }));
+      continue;
+    }
     const header = new TableRow({
       tableHeader: true,
       children: [

@@ -62,6 +62,9 @@ export default function ProjectPage() {
   const [newRoleBase, setNewRoleBase] = useState("REVIEWER");
   const [showAi, setShowAi] = useState(false);
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
+  const [creating, setCreating] = useState(false);   // 上传/新建进行中，防止重复提交
+  const [ocrBookBusy, setOcrBookBusy] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [toast, setToast] = useState("");
 
   const load = useCallback(() => {
@@ -137,6 +140,8 @@ export default function ProjectPage() {
 
   async function createChapter(e: React.FormEvent) {
     e.preventDefault();
+    if (creating) return; // 防止 PDF 解析较慢时被重复点击提交
+    setCreating(true);
     try {
       let body: Record<string, unknown> = { title: newTitle };
       if (uploadFile) {
@@ -152,6 +157,58 @@ export default function ProjectPage() {
       setNewTitle(""); setUploadFile(null); load();
       flash(uploadFile ? "已上传并解析为书稿" : "章节已创建");
     } catch (err) { flash(err instanceof Error ? err.message : "创建失败"); }
+    finally { setCreating(false); }
+  }
+
+  // ===== 章节删除 / 排序 =====
+  async function applyOrder(ids: string[]) {
+    try { await api(`/projects/${id}/manuscripts/order`, { method: "PATCH", body: { ids } }); load(); }
+    catch (err) { flash(err instanceof Error ? err.message : "排序失败"); }
+  }
+  function moveChapter(mid: string, dir: -1 | 1) {
+    if (!project) return;
+    const ids = project.manuscripts.map((m) => m.id);
+    const i = ids.indexOf(mid), j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    applyOrder(ids);
+  }
+  function dropOn(targetId: string) {
+    const src = dragId;
+    setDragId(null);
+    if (!project || !src || src === targetId) return;
+    const ids = project.manuscripts.map((m) => m.id);
+    const from = ids.indexOf(src), to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    ids.splice(from, 1);
+    ids.splice(to, 0, src);
+    applyOrder(ids);
+  }
+  async function deleteChapter(mid: string, title: string) {
+    if (!(await confirm({
+      title: "删除章节",
+      body: `确定删除「${title}」？该章节的所有审校意见与修订版本将一并删除，且无法恢复。`,
+      confirmText: "删除", danger: true,
+    }))) return;
+    try { await api(`/manuscripts/${mid}`, { method: "DELETE" }); load(); flash("章节已删除"); }
+    catch (err) { flash(err instanceof Error ? err.message : "删除失败"); }
+  }
+
+  // 全书文字识别（OCR）：把页面图片里的文字识别出来供 AI 审校
+  async function ocrBook() {
+    if (ocrBookBusy) return;
+    if (!(await confirm({
+      title: "全书文字识别",
+      body: "将对全书所有尚未识别的页面图片进行文字识别，页数较多时可能需要较长时间。识别结果仅用于 AI 审校与报告引用，不会改动页面图片。继续？",
+      confirmText: "开始识别",
+    }))) return;
+    setOcrBookBusy(true);
+    try {
+      const r = await api<{ updated: number; scanned: number; chapters: number }>(`/projects/${id}/ocr`, { method: "POST", body: {} });
+      load();
+      flash(r.scanned ? `识别完成：新识别 ${r.updated} 页（共 ${r.scanned} 页，涉及 ${r.chapters} 章）` : "全书没有可识别的页面图片");
+    } catch (err) { flash(err instanceof Error ? err.message : "识别失败"); }
+    finally { setOcrBookBusy(false); }
   }
 
   async function addMember(e: React.FormEvent) {
@@ -254,6 +311,12 @@ export default function ProjectPage() {
                         {batch ? `AI 审校中 ${batch.done}/${batch.total}` : "🤖 批量 AI 审校"}
                       </button>
                     )}
+                    {project.myRole !== "AI_ASSISTANT" && (
+                      <button className="btn btn-ghost btn-sm" disabled={ocrBookBusy} onClick={ocrBook}
+                        title="识别全书页面图片中的文字，供 AI 审校（不改动图片）">
+                        {ocrBookBusy ? "识别中…" : "🔤 全书识别文字"}
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -285,7 +348,17 @@ export default function ProjectPage() {
                       <button className="btn btn-ghost btn-sm" onClick={() => setRenameId(null)}>取消</button>
                     </div>
                   ) : (
-                    <div key={m.id} className="revision-item" style={{ alignItems: "center" }}>
+                    <div
+                      key={m.id}
+                      className={`revision-item chapter-row ${dragId === m.id ? "dragging" : ""}`}
+                      style={{ alignItems: "center" }}
+                      draggable={isChief}
+                      onDragStart={() => isChief && setDragId(m.id)}
+                      onDragOver={(e) => { if (isChief && dragId) e.preventDefault(); }}
+                      onDrop={(e) => { if (isChief) { e.preventDefault(); dropOn(m.id); } }}
+                      onDragEnd={() => setDragId(null)}
+                    >
+                      {isChief && <span className="drag-handle" title="拖动以调整章节顺序">⠿</span>}
                       <Link href={`/manuscripts/${m.id}`} style={{ textDecoration: "none", color: "inherit", flex: 1 }}>
                         <div style={{ cursor: "pointer" }}>
                           <strong>{m.title}</strong>
@@ -294,8 +367,15 @@ export default function ProjectPage() {
                           </div>
                         </div>
                       </Link>
-                      {isChief && m.status !== "FINALIZED" && (
-                        <button className="btn btn-ghost btn-sm" onClick={() => { setRenameId(m.id); setRenameVal(m.title); }}>改名</button>
+                      {isChief && (
+                        <span className="chapter-ops">
+                          <button className="btn btn-ghost btn-sm" title="上移" onClick={() => moveChapter(m.id, -1)}>↑</button>
+                          <button className="btn btn-ghost btn-sm" title="下移" onClick={() => moveChapter(m.id, 1)}>↓</button>
+                          {m.status !== "FINALIZED" && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => { setRenameId(m.id); setRenameVal(m.title); }}>改名</button>
+                          )}
+                          <button className="btn btn-danger btn-sm" onClick={() => deleteChapter(m.id, m.title)}>删除</button>
+                        </span>
                       )}
                       <span className={`badge ${m.status === "FINALIZED" ? "badge-ok" : m.status === "IN_REVIEW" ? "badge-warn" : "badge-gray"}`}>
                         {STATUS_LABEL[m.status]}
@@ -307,13 +387,16 @@ export default function ProjectPage() {
               {project.myRole !== "AI_ASSISTANT" && (
                 <form style={{ marginTop: 14 }} onSubmit={createChapter}>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <input className="input" style={{ flex: 1 }} placeholder="新章节标题，例如：第二章 旧信" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} required />
-                    <button className="btn">{uploadFile ? "上传并解析" : "新建书稿"}</button>
+                    <input className="input" style={{ flex: 1 }} placeholder="新章节标题，例如：第二章 旧信" value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)} disabled={creating} required />
+                    <button className="btn" disabled={creating}>
+                      {creating ? (uploadFile ? "解析中…" : "创建中…") : (uploadFile ? "上传并解析" : "新建书稿")}
+                    </button>
                   </div>
-                  <label className="upload-drop" style={{ display: "block", marginTop: 8 }}>
-                    {uploadFile ? `已选择：${uploadFile.name}（${uploadKind(uploadFile.name)}）` : "可选：上传 HTML / Markdown / PDF 文件，自动解析为可审校内容（PDF 逐页分文本页/图册页）"}
+                  <label className="upload-drop" style={{ display: "block", marginTop: 8, opacity: creating ? 0.6 : 1 }}>
+                    {uploadFile ? `已选择：${uploadFile.name}（${uploadKind(uploadFile.name)}）` : "可选：上传 HTML / Markdown / PDF 文件，自动解析为可审校内容（PDF 逐页渲染为可批注的页面）"}
                     <input
-                      type="file" accept=".html,.htm,.md,.markdown,.txt,.pdf" style={{ display: "none" }}
+                      type="file" accept=".html,.htm,.md,.markdown,.txt,.pdf" style={{ display: "none" }} disabled={creating}
                       onChange={(e) => {
                         const f = e.target.files?.[0] ?? null;
                         setUploadFile(f);
@@ -321,7 +404,12 @@ export default function ProjectPage() {
                       }}
                     />
                   </label>
-                  {uploadFile && <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 6 }} onClick={() => setUploadFile(null)}>清除文件</button>}
+                  {creating && (
+                    <div className="upload-progress">
+                      正在上传并解析{uploadFile && /\.pdf$/i.test(uploadFile.name) ? " PDF（逐页渲染为图片，页数多时需要一两分钟）" : ""}，请勿重复点击或关闭页面…
+                    </div>
+                  )}
+                  {uploadFile && !creating && <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 6 }} onClick={() => setUploadFile(null)}>清除文件</button>}
                 </form>
               )}
             </div>

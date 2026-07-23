@@ -260,6 +260,55 @@ button { font-family: inherit; }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: grid; place-items: center; padding: 24px; cursor: zoom-out; }
 .lightbox img { max-width: 96vw; max-height: 92vh; object-fit: contain; box-shadow: 0 8px 40px rgba(0,0,0,0.6); cursor: default; }
 .lightbox-close { position: fixed; top: 16px; right: 20px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 0.9rem; }
+
+/* ===== PDF 页面块（一页一块：整页图 + 图上工具 + 批注覆盖层）===== */
+.rb-page-block { margin: 4px 0; }
+.rb-page-label { font-size: 0.82rem; color: #666; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rb-page-chip { border-radius: 10px; padding: 1px 8px; font-size: 0.75rem; }
+.rb-page-chip.mk { background: #fff4e5; color: #b26500; }
+.rb-page-chip.ocr { background: #e8f5e9; color: #2e7d32; }
+.rb-page-figure { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.rb-page-img { display: block; max-width: 100%; height: auto; border: 1px solid var(--edge); border-radius: 6px; }
+.rb-page-tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; opacity: 0; transition: opacity .15s; }
+.rb-page-figure:hover .rb-page-tools, .rb-page-tools:focus-within { opacity: 1; }
+.pg-tool { background: rgba(255,255,255,0.94); border: 1px solid #bbb; border-radius: 6px; width: 30px; height: 30px; font-size: 0.95rem; line-height: 1; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+.pg-tool:hover { background: #fff; border-color: #666; }
+.pg-tool:disabled { opacity: 0.55; cursor: default; }
+
+/* 批注覆盖层 */
+.marks-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.mark-text { position: absolute; transform: translateY(-50%); background: rgba(255,255,255,0.92); border: 1.5px solid; border-radius: 4px; padding: 1px 6px; font-size: 0.8rem; line-height: 1.4; white-space: nowrap; pointer-events: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+
+/* ===== 页面批注编辑器 ===== */
+.annot-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 220; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.annot-modal { background: var(--bg, #fff); border-radius: 10px; max-width: 96vw; max-height: 94vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 50px rgba(0,0,0,0.5); }
+.annot-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--edge); }
+.annot-title { font-size: 0.95rem; }
+.annot-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.annot-actions { display: flex; gap: 8px; margin-left: auto; }
+.annot-colors { display: inline-flex; gap: 4px; margin: 0 4px; }
+.swatch { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.swatch.on { border-color: #333; box-shadow: 0 0 0 2px #fff inset; }
+.annot-err { background: #fdecea; color: #b3261e; padding: 6px 14px; font-size: 0.85rem; }
+.annot-canvas-wrap { overflow: auto; padding: 12px; display: flex; justify-content: center; }
+.annot-canvas { position: relative; display: inline-block; line-height: 0; touch-action: none; user-select: none; }
+.annot-canvas img { display: block; max-width: 100%; max-height: 72vh; }
+.annot-canvas.tool-pen { cursor: crosshair; }
+.annot-canvas.tool-rect { cursor: crosshair; }
+.annot-canvas.tool-text { cursor: text; }
+.annot-text-input { position: absolute; transform: translateY(-50%); display: flex; gap: 4px; align-items: center; background: #fff; border: 1px solid #888; border-radius: 6px; padding: 4px; z-index: 5; line-height: normal; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
+.annot-text-input .input { width: 180px; }
+.annot-hint { padding: 8px 14px; font-size: 0.82rem; color: #777; border-top: 1px solid var(--edge); }
+
+/* ===== 章节排序 / 删除 ===== */
+.chapter-row.dragging { opacity: 0.45; }
+.chapter-row[draggable="true"] { cursor: default; }
+.drag-handle { cursor: grab; color: #aaa; font-size: 1.05rem; padding: 0 4px; user-select: none; }
+.drag-handle:active { cursor: grabbing; }
+.chapter-ops { display: inline-flex; gap: 4px; align-items: center; }
+
+/* 上传进行中提示 */
+.upload-progress { margin-top: 8px; font-size: 0.85rem; color: #8a6d00; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; padding: 8px 10px; }
 .rb-img-ph { background: var(--panel-2, #f4f4f4); border: 1px dashed var(--edge); border-radius: 6px; padding: 20px; text-align: center; color: var(--ink-soft); }
 .rb-page { display: inline-block; background: var(--ink); color: #fff; font-size: 0.78rem; padding: 3px 10px; border-radius: 6px; }
 .rb-page.gallery { background: var(--accent); }

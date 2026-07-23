@@ -95,18 +95,19 @@ function naturalCmp(a: string, b: string) {
   return na - nb;
 }
 
-// 富解析：每页 = 页标记 + 渲染图（若可）+ 可评审文字。适合图文杂志类 PDF。
+// 富解析：PDF 每一页 = 一个「页面块」（image + page 页码 + ocr 隐藏文字）。适合图文杂志类 PDF。
+// 一页一块，页码与内容严格对应；抽取到的文字先放入 ocr（隐藏），后续可再跑 OCR 补全图册页。
 export async function parsePdfRich(buf: Buffer): Promise<{ doc: Doc; text: string; rendered: boolean }> {
   const pages = await parsePdfPages(new Uint8Array(buf));
   let images: string[] = [];
   try { images = await renderPdfToImages(buf); } catch { images = []; }
-  const blocks: Block[] = [];
-  pages.forEach((p, i) => {
-    blocks.push({ type: "page", pageKind: p.kind, label: `第 ${i + 1} 页` });
-    if (images[i]) blocks.push({ type: "image", src: images[i], alt: `第 ${i + 1} 页` });
-    for (const para of splitParagraphs(p.text)) if (para.trim()) blocks.push({ type: "para", text: para });
-    if (!p.text.trim() && !images[i]) blocks.push({ type: "note", text: "（本页无可提取文字，且未渲染图片）" });
-  });
+  const blocks: Block[] = pages.map((p, i) => ({
+    type: "image" as const,
+    src: images[i] ?? "",
+    alt: `第 ${i + 1} 页`,
+    page: i + 1,
+    ocr: p.text.trim(),
+  }));
   return { doc: { blocks }, text: blocksToText(blocks), rendered: images.length > 0 };
 }
 
