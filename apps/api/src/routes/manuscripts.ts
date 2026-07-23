@@ -59,6 +59,23 @@ manuscriptsRouter.get("/:id", async (req: AuthedRequest, res) => {
   res.json({ ...manuscript, comments, revisions, myRole: role });
 });
 
+// 修改书稿标题（仅主编，用于批量统一章节名称）
+manuscriptsRouter.patch("/:id/title", async (req: AuthedRequest, res) => {
+  const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
+  if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可修改标题" });
+
+  const schema = z.object({ title: z.string().min(1, "标题不能为空").max(200) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  if (parsed.data.title === manuscript.title) return res.status(400).json({ error: "标题没有变化" });
+
+  await prisma.manuscript.update({ where: { id: manuscript.id }, data: { title: parsed.data.title } });
+  const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+  await logActivity(manuscript.projectId, me!.name, "修改标题", `${manuscript.title} → ${parsed.data.title}`);
+  res.json({ ok: true, title: parsed.data.title });
+});
+
 // 导出单章为 Markdown / HTML
 manuscriptsRouter.get("/:id/export", async (req: AuthedRequest, res) => {
   const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
