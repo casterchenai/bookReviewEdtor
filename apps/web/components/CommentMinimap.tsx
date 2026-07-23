@@ -44,6 +44,7 @@ export default function CommentMinimap({ comments, idPrefix }: { comments: C[]; 
           key={c.id}
           className={`mm-tick ${hover === c.id ? "hot" : ""} ${c.status === "OPEN" ? "open" : "done"} ${c.author.isAI ? "ai" : ""}`}
           style={{ top }}
+          title={`${c.author.isAI ? "🤖 " : ""}${c.aiAgentName || c.author.name} · ${CATEGORY_LABEL[c.category] ?? c.category} · ¶${c.paragraphIndex + 1}\n${c.body.slice(0, 80)}`}
           onMouseEnter={() => setHover(c.id)}
           onMouseLeave={() => setHover((h) => (h === c.id ? null : h))}
           onClick={() => document.getElementById(`${idPrefix}${c.paragraphIndex}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}

@@ -268,11 +268,13 @@ button { font-family: inherit; }
 .de-preview { font-size: 0.85rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 审校意见迷你滑块 */
-.cmt-minimap { position: fixed; right: 0; top: 0; height: 100vh; width: 20px; z-index: 40; pointer-events: none; }
-.mm-tick { position: absolute; right: 3px; width: 11px; height: 2px; border-radius: 2px; background: var(--accent); opacity: 0.7; cursor: pointer; pointer-events: auto; transition: height 0.1s, width 0.1s, opacity 0.1s; }
-.mm-tick.done { background: var(--ink-soft); opacity: 0.4; }
-.mm-tick.ai { background: var(--primary); }
-.mm-tick:hover, .mm-tick.hot { height: 5px; width: 18px; opacity: 1; }
+.cmt-minimap { position: fixed; right: 0; top: 0; height: 100vh; width: 22px; z-index: 40; pointer-events: none; }
+/* 可点区域较高（易点），可见横杠用 ::before 细线呈现 */
+.mm-tick { position: absolute; right: 0; width: 20px; height: 8px; margin-top: -4px; cursor: pointer; pointer-events: auto; display: flex; align-items: center; justify-content: flex-end; transition: height 0.1s; }
+.mm-tick::before { content: ""; display: block; width: 11px; height: 2px; border-radius: 2px; background: var(--accent); opacity: 0.7; transition: height 0.1s, width 0.1s, opacity 0.1s; }
+.mm-tick.done::before { background: var(--ink-soft); opacity: 0.4; }
+.mm-tick.ai::before { background: var(--primary); }
+.mm-tick:hover::before, .mm-tick.hot::before { height: 5px; width: 18px; opacity: 1; }
 .mm-tip {
   position: absolute; right: 22px; top: -10px; white-space: normal; width: 260px;
   background: var(--ink); color: #fff; font-size: 0.74rem; line-height: 1.35; padding: 6px 10px;
