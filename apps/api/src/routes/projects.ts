@@ -4,7 +4,7 @@ import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { AI_PROVIDERS, sanitizeAiConfig } from "../lib/ai-providers.js";
 import { parseHtml, parseMarkdown, normalizeDoc, blocksToHtml, blocksToMarkdown, textToMarkdown, type Block } from "../lib/content.js";
-import { parsePdf } from "../lib/pdf.js";
+import { parsePdfRich } from "../lib/pdf.js";
 import { bookToDocx } from "../lib/docx.js";
 import { extractReference } from "../lib/references.js";
 
@@ -584,7 +584,7 @@ projectsRouter.post("/:id/manuscripts", async (req: AuthedRequest, res) => {
   } else if (parsed.data.source && parsed.data.sourceType === "pdf") {
     try {
       const buf = Buffer.from(parsed.data.source, "base64");
-      const r = await parsePdf(new Uint8Array(buf));
+      const r = await parsePdfRich(buf); // 逐页渲染图片 + 可评审文字（图文杂志）
       content = r.text; docJson = JSON.stringify(r.doc);
     } catch (err) {
       console.error("PDF parse failed:", err);

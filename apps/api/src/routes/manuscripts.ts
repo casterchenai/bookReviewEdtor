@@ -7,7 +7,8 @@ import {
   blocksToText, normalizeDoc, setBlockText, type Block,
   blocksToMarkdown, blocksToHtml, textToMarkdown, textToHtml,
 } from "../lib/content.js";
-import { manuscriptToDocx } from "../lib/docx.js";
+import { manuscriptToDocx, reviewReportDocx } from "../lib/docx.js";
+import { buildReport, reviewReportHtml, type ReportComment } from "../lib/report.js";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -97,6 +98,47 @@ manuscriptsRouter.get("/:id/export", async (req: AuthedRequest, res) => {
   res.setHeader("Content-Type", contentType(format));
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(manuscript.title)}.${format}`);
   res.send(out);
+});
+
+// 导出审校报告（按页/段汇总意见，供排版设计师据此修改 PDF）
+manuscriptsRouter.get("/:id/report", async (req: AuthedRequest, res) => {
+  const { manuscript, role } = await loadWithRole(req.params.id, req.userId!);
+  if (!manuscript) return res.status(404).json({ error: "书稿不存在" });
+  if (!role) return res.status(403).json({ error: "您不是该项目成员" });
+
+  const raw = await prisma.comment.findMany({
+    where: { manuscriptId: manuscript.id },
+    include: { author: { select: { name: true } } },
+    orderBy: { paragraphIndex: "asc" },
+  });
+  const comments: ReportComment[] = raw.map((c) => ({
+    paragraphIndex: c.paragraphIndex,
+    quote: c.quote,
+    body: c.body,
+    category: c.category,
+    suggestedText: c.suggestedText,
+    aiAgentName: c.aiAgentName,
+    authorRole: c.authorRole,
+    authorName: c.author.name,
+    status: c.status,
+  }));
+  const blocks = manuscript.docJson ? normalizeDoc(JSON.parse(manuscript.docJson))?.blocks ?? null : null;
+  const name = `${manuscript.title}-审校报告`;
+
+  if (req.query.format === "docx") {
+    const buf = await reviewReportDocx(manuscript.title, blocks, comments, roleLabel);
+    res.setHeader("Content-Type", DOCX_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name)}.docx`);
+    return res.send(buf);
+  }
+  if (req.query.format === "json") {
+    return res.json({ title: manuscript.title, groups: buildReport(blocks, comments) });
+  }
+  const html = reviewReportHtml(manuscript.title, buildReport(blocks, comments), roleLabel);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  const inline = req.query.inline === "1";
+  res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}.html`);
+  res.send(html);
 });
 
 // 保存内容 → 生成新修订版本

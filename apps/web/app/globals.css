@@ -256,6 +256,10 @@ button { font-family: inherit; }
 .rb-table.edit th, .rb-table.edit td { padding: 2px; }
 .cell-input { width: 100%; min-width: 80px; border: 1px solid var(--edge); border-radius: 4px; padding: 4px 6px; font: inherit; background: var(--panel); color: var(--ink); }
 .rb-img { max-width: 100%; border-radius: 6px; }
+.rb-img.zoomable { cursor: zoom-in; border: 1px solid var(--edge); }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: grid; place-items: center; padding: 24px; cursor: zoom-out; }
+.lightbox img { max-width: 96vw; max-height: 92vh; object-fit: contain; box-shadow: 0 8px 40px rgba(0,0,0,0.6); cursor: default; }
+.lightbox-close { position: fixed; top: 16px; right: 20px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 0.9rem; }
 .rb-img-ph { background: var(--panel-2, #f4f4f4); border: 1px dashed var(--edge); border-radius: 6px; padding: 20px; text-align: center; color: var(--ink-soft); }
 .rb-page { display: inline-block; background: var(--ink); color: #fff; font-size: 0.78rem; padding: 3px 10px; border-radius: 6px; }
 .rb-page.gallery { background: var(--accent); }

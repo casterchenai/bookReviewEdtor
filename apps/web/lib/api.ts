@@ -77,6 +77,22 @@ export async function downloadFile(path: string) {
   a.remove(); URL.revokeObjectURL(url);
 }
 
+// 带鉴权拉取后在新标签页打开（用于 HTML 预览，Bearer token 无法直接 window.open）
+export async function openFile(path: string) {
+  const res = await fetch(`${BASE}/api${path}`, {
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, (data as { error?: string }).error || "打开失败");
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, "_blank");
+  if (!w) { URL.revokeObjectURL(url); throw new ApiError(0, "浏览器拦截了弹窗，请允许后重试"); }
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 export const ROLE_LABEL: Record<string, string> = {
   CHIEF_EDITOR: "主编",
   AGENT: "文学经纪人",

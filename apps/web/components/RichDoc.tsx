@@ -62,6 +62,7 @@ export function RichDocView({
   renderAfter?: (i: number) => React.ReactNode;
   highlight?: string;
 }) {
+  const [lightbox, setLightbox] = useState<string | null>(null);
   return (
     <div className="manuscript-body rich">
       {blocks.map((b, i) => (
@@ -74,16 +75,22 @@ export function RichDocView({
             onClick={() => onSelect(i)}
           >
             <span className="p-index">¶{i + 1}{b.type !== "para" && b.type !== "heading" ? ` ${BLOCK_TAG[b.type] ?? ""}` : ""}</span>
-            <BlockBody b={b} hl={highlight} />
+            <BlockBody b={b} hl={highlight} onImageClick={setLightbox} />
           </div>
           {renderAfter?.(i)}
         </div>
       ))}
+      {lightbox && (
+        <div className="lightbox" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="放大查看" onClick={(e) => e.stopPropagation()} />
+          <button className="lightbox-close" onClick={() => setLightbox(null)}>✕ 关闭</button>
+        </div>
+      )}
     </div>
   );
 }
 
-function BlockBody({ b, hl = "" }: { b: Block; hl?: string }) {
+function BlockBody({ b, hl = "", onImageClick }: { b: Block; hl?: string; onImageClick?: (src: string) => void }) {
   const H = (t: string) => hl ? renderHighlight(t, hl) : t;
   switch (b.type) {
     case "heading":
@@ -108,7 +115,7 @@ function BlockBody({ b, hl = "" }: { b: Block; hl?: string }) {
       );
     case "image":
       return b.src
-        ? <img className="rb-img" src={b.src} alt={b.alt} />
+        ? <img className="rb-img zoomable" src={b.src} alt={b.alt} title="点击放大" onClick={(e) => { e.stopPropagation(); onImageClick?.(b.src); }} />
         : <div className="rb-img-ph">🖼 {b.alt || "（图片）"}</div>;
     case "page":
       return <div className={`rb-page ${b.pageKind}`}>{b.label} · {b.pageKind === "gallery" ? "图册页" : "文本页"}</div>;

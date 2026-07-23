@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { diffChars } from "diff";
 import TopBar from "@/components/TopBar";
-import { api, downloadFile, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
+import { api, downloadFile, openFile, CATEGORY_LABEL, ROLE_LABEL, STATUS_LABEL } from "@/lib/api";
 import { RichDocView, RichDocEditor, parseDoc, blockPreview, renderHighlight, type Block } from "@/components/RichDoc";
 import CommentMargin from "@/components/CommentMargin";
 import CommentMinimap from "@/components/CommentMinimap";
@@ -338,6 +338,8 @@ export default function ManuscriptPage() {
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=docx`).catch((e) => flash(e.message))}>导出 Word</button>
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=md`).catch((e) => flash(e.message))}>导出 MD</button>
           <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/export?format=html`).catch((e) => flash(e.message))}>导出 HTML</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => openFile(`/manuscripts/${id}/report?inline=1`).catch((e) => flash(e.message))} title="按页/段汇总审校意见，供排版设计师修改 PDF">预览审校报告</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(`/manuscripts/${id}/report?format=docx`).catch((e) => flash(e.message))}>审校报告 Word</button>
           {isChief && (
             <button className={`btn ${finalized ? "btn-ghost" : ""}`} onClick={async () => {
               try { await api(`/manuscripts/${id}/finalize`, { method: "POST", body: { finalize: !finalized } }); load(); flash(finalized ? "已解除定稿" : "已定稿锁定"); }
