@@ -160,14 +160,18 @@ export async function runReview(
   paragraphs: string[],
   standards: string,
   agentPrompt = "",
+  references = "",
 ): Promise<Suggestion[]> {
   const standardsBlock = standards.trim()
     ? `\n\n本项目主编制定的修订标准（审校时须遵循）：\n${standards}`
     : "";
+  const refBlock = references.trim()
+    ? `\n\n本书参考文献 / 资料（审校时请据此核对书稿是否与之一致、是否有出入或遗漏）：\n${references}`
+    : "";
   const base = agentPrompt.trim()
     ? `${agentPrompt.trim()}\n\n审校要求：逐段检查，只报告确实存在的问题；每条给出修改后的完整段落文本（suggestedParagraph 为整段替换文本）；使用简体中文；最多返回 10 条最重要的建议。`
     : SYSTEM_PROMPT;
-  const system = base + standardsBlock;
+  const system = base + standardsBlock + refBlock;
   const numbered = paragraphs.map((p, i) => `【第 ${i} 段】\n${p}`).join("\n\n");
   const userMsg = `请审校以下书稿内容，段落序号已标注：\n\n${numbered}`;
 

@@ -5,6 +5,7 @@ import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../mid
 import { AI_PROVIDERS, sanitizeAiConfig } from "../lib/ai-providers.js";
 import { parseHtml, parseMarkdown, normalizeDoc, blocksToHtml, blocksToMarkdown, textToMarkdown, type Block } from "../lib/content.js";
 import { parsePdf } from "../lib/pdf.js";
+import { extractReference } from "../lib/references.js";
 
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
@@ -450,6 +451,75 @@ projectsRouter.delete("/:id/agents/:agentId", async (req: AuthedRequest, res) =>
   const agent = await prisma.aiAgent.findFirst({ where: { id: req.params.agentId, projectId: req.params.id } });
   if (!agent) return res.status(404).json({ error: "智能体不存在" });
   await prisma.aiAgent.delete({ where: { id: agent.id } });
+  res.json({ ok: true });
+});
+
+// ===== 本书参考文献 / 资料 =====
+
+const MAX_KEEP_BINARY = 12_000_000; // base64 超过则只留文本，不存二进制
+
+// 列出参考文献（仅元数据，不含大字段）
+projectsRouter.get("/:id/references", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (!role) return res.status(403).json({ error: "您不是该项目成员" });
+  const refs = await prisma.reference.findMany({
+    where: { projectId: req.params.id },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true, kind: true, mime: true, size: true, createdAt: true, textContent: true, dataBase64: true },
+  });
+  res.json(refs.map((r) => ({
+    id: r.id, name: r.name, kind: r.kind, mime: r.mime, size: r.size, createdAt: r.createdAt,
+    hasText: r.textContent.length > 0, textChars: r.textContent.length, downloadable: r.dataBase64.length > 0,
+  })));
+});
+
+// 上传参考文献（仅主编；base64）
+projectsRouter.post("/:id/references", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可上传参考文献" });
+  const schema = z.object({
+    name: z.string().min(1).max(300),
+    mime: z.string().max(200).optional(),
+    dataBase64: z.string().min(1).max(35_000_000),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  let buf: Buffer;
+  try { buf = Buffer.from(parsed.data.dataBase64, "base64"); } catch { return res.status(400).json({ error: "文件解码失败" }); }
+  const { kind, text } = await extractReference(parsed.data.name, buf);
+  const keepBinary = parsed.data.dataBase64.length <= MAX_KEEP_BINARY;
+
+  const ref = await prisma.reference.create({
+    data: {
+      projectId: req.params.id, name: parsed.data.name, mime: parsed.data.mime ?? "",
+      kind, size: buf.length, textContent: text,
+      dataBase64: keepBinary ? parsed.data.dataBase64 : "",
+    },
+  });
+  const me = await prisma.user.findUnique({ where: { id: req.userId! } });
+  await logActivity(req.params.id, me!.name, "上传参考文献", parsed.data.name);
+  res.json({ id: ref.id, kind, textChars: text.length, downloadable: keepBinary });
+});
+
+// 下载参考文献
+projectsRouter.get("/:id/references/:refId/download", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (!role) return res.status(403).json({ error: "您不是该项目成员" });
+  const ref = await prisma.reference.findFirst({ where: { id: req.params.refId, projectId: req.params.id } });
+  if (!ref || !ref.dataBase64) return res.status(404).json({ error: "文件不可下载" });
+  res.setHeader("Content-Type", ref.mime || "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(ref.name)}`);
+  res.send(Buffer.from(ref.dataBase64, "base64"));
+});
+
+// 删除参考文献（仅主编）
+projectsRouter.delete("/:id/references/:refId", async (req: AuthedRequest, res) => {
+  const role = await memberRole(req.params.id, req.userId!);
+  if (role !== "CHIEF_EDITOR") return res.status(403).json({ error: "仅主编可删除参考文献" });
+  const ref = await prisma.reference.findFirst({ where: { id: req.params.refId, projectId: req.params.id } });
+  if (!ref) return res.status(404).json({ error: "参考文献不存在" });
+  await prisma.reference.delete({ where: { id: ref.id } });
   res.json({ ok: true });
 });
 

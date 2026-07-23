@@ -4,6 +4,16 @@ import { prisma } from "../db.js";
 import { logActivity, memberRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { resolveAiConfig, runReview, runRewrite, runOptimizeComment, runScanIssue, runSuggestAgents, type Suggestion } from "../lib/ai-providers.js";
 import { normalizeDoc, blockText, type Block } from "../lib/content.js";
+import { referencesDigest } from "../lib/references.js";
+
+// 取本书参考文献汇总文本（供审校/设计智能体核对）
+async function bookReferences(projectId: string, limit = 8000): Promise<string> {
+  const refs = await prisma.reference.findMany({
+    where: { projectId }, orderBy: { createdAt: "asc" },
+    select: { name: true, kind: true, textContent: true },
+  });
+  return referencesDigest(refs, limit);
+}
 
 export const aiRouter = Router();
 aiRouter.use(requireAuth);
@@ -175,7 +185,8 @@ aiRouter.post("/manuscripts/:id/review", async (req: AuthedRequest, res) => {
 
   if (cfg) {
     try {
-      suggestions = await runReview(cfg, paragraphs, manuscript.project.standards, agent?.systemPrompt ?? "");
+      const refs = await bookReferences(manuscript.projectId);
+      suggestions = await runReview(cfg, paragraphs, manuscript.project.standards, agent?.systemPrompt ?? "", refs);
       engine = `${cfg.provider.toLowerCase()}:${cfg.model}`;
     } catch (err) {
       console.error("AI review failed:", err);
@@ -242,7 +253,9 @@ aiRouter.post("/projects/:id/suggest-agents", async (req: AuthedRequest, res) =>
     sample += `\n\n【${c.title}】\n${c.content.slice(0, 2500)}`;
     if (sample.length > 6000) break;
   }
-  const digest = `目录：\n${toc}\n\n样章：${sample}`.slice(0, 9000);
+  const refs = await bookReferences(req.params.id, 6000);
+  const refBlock = refs ? `\n\n参考文献 / 资料（设计智能体时请一并考虑，让智能体能据此核对书稿）：\n${refs}` : "";
+  const digest = `目录：\n${toc}\n\n样章：${sample}${refBlock}`.slice(0, 14000);
 
   const cfg = await resolveAiConfig(req.params.id);
   if (!cfg) return res.status(400).json({ error: "未配置任何 AI 供应商" });

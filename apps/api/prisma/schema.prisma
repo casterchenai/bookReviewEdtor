@@ -58,6 +58,23 @@ model BookRole {
   @@unique([projectId, name])
 }
 
+// 每本书的参考文献 / 资料（供 AI 设计智能体、及审校时据以核对）
+model Reference {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String   // 原始文件名
+  mime        String   @default("")
+  kind        String   @default("other") // pdf | word | sheet | slide | image | other
+  size        Int      @default(0)
+  textContent String   @default("") // 提取的文本（供 AI 阅读）
+  dataBase64  String   @default("") // 原始文件 base64（供下载/预览；过大则为空）
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
 // 每本书的 AI 审校智能体（不同书可有不同智能体：名称 + 角色 + 技能提示词）
 model AiAgent {
   id           String          @id @default(cuid())
@@ -106,6 +123,7 @@ model Project {
   bookRoles   BookRole[]
   aiConfig    AiConfig?
   aiAgents    AiAgent[]
+  references  Reference[]
 }
 
 model ProjectMember {
